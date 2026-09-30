@@ -1,0 +1,48 @@
+# slurm-llm settings for each cluster: ~/.config/slurm-llm/clusters.yaml
+#
+# The clusters themselves (login host, user, Slurm account, GPU types) are defined in rclust's
+# config, ~/.config/rclust/config.yaml (`rclust config`). Each entry here adds what slurm-llm
+# needs to run vLLM there, under the same cluster name. `sllm config cluster` edits this
+# file interactively.
+
+clusters:
+  cluster-a:
+    # Where job scripts, logs and endpoint files go (default ~/remote-llm). `~` and
+    # environment variables such as $SCRATCH are expanded on the cluster.
+    remote_root: ~/remote-llm
+    # Hugging Face cache for model weights, and home of the Python environment
+    # (<model_path>/.venv). Models are large: pick a filesystem with room, e.g. scratch or project space.
+    model_path: $SCRATCH/models
+
+    # Shell lines run before creating the environment and before starting vLLM, e.g. to load
+    # your site's Python and CUDA modules. Use the same Python for both.
+    setup_commands:
+      - module load python/3.12 cuda/12.4
+
+    # Extra #SBATCH options (the account comes from rclust's config)
+    # sbatch_args:
+    #   - --partition=gpu
+    # cpus_per_task: 4
+
+    # How GPUs are requested: "per-node" (--gpus-per-node=N, all on one node) or
+    # "flexible" (--gpus=N). require_single_node adds --nodes=1 with "flexible".
+    gpu_allocation_mode: per-node
+
+    # Memory (GB) of the GPU types listed in rclust's config, matched by `type`. slurm-llm uses
+    # it to choose a GPU and the number of GPUs for each model. Types can also be defined here
+    # in full: slurm_spec is the name Slurm expects (omit it to request GPUs without a type);
+    # is_full_gpu: false marks MIG slices, which cannot be combined for tensor parallelism.
+    gpu_types:
+      - type: a100
+        memory: 80
+      # - type: a100_3g
+      #   memory: 40
+      #   slurm_spec: a100_3g.40gb
+      #   is_full_gpu: false
+
+  # cluster-b:
+  #   model_path: /path/with/space/for/models
+  #   gpu_allocation_mode: flexible
+  #   gpu_types:
+  #     - type: h100
+  #       memory: 80

@@ -1,0 +1,19 @@
+# Optional: ~/.config/slurm-llm/cluster_preferences.yaml
+#
+# Clusters to consider for each model size (sizes as in resources.yaml and model_registry.yaml),
+# used when a model's GPU memory is unknown. Otherwise every cluster with big enough GPUs is a
+# candidate. Among the candidates, rclust picks the one expected to start the job soonest.
+# `any` means every configured cluster. `sllm config preferences` edits this file.
+
+cluster_preferences:
+  huge:
+    - cluster-a
+  large:
+    - cluster-a
+    - cluster-b
+  medium:
+    - any
+  small:
+    - any
+  tiny:
+    - any

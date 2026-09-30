@@ -1,0 +1,40 @@
+# Slurm resources for each model size: ~/.config/slurm-llm/resources.yaml
+#
+#   memory:                 system RAM in GB (--mem)
+#   time:                   time limit (--time); override per command with --time
+#   estimated_model_memory: GPU memory (GB) assumed for models that have not been scanned
+
+tiny:
+  memory: 20  # System RAM
+  time: "1:00:00"
+  estimated_model_memory: 10  # ~3-4B models
+
+small:
+  memory: 20
+  time: "1:00:00"
+  estimated_model_memory: 20  # ~7-8B models
+
+mid:
+  memory: 30
+  time: "1:00:00"
+  estimated_model_memory: 35  # ~12-14B models
+
+mid_high:
+  memory: 30
+  time: "1:00:00"
+  estimated_model_memory: 80  # ~32B models
+
+medium:
+  memory: 30
+  time: "1:00:00"
+  estimated_model_memory: 90  # ~70B+ models or MoE
+
+large:
+  memory: 30
+  time: "1:00:00"
+  estimated_model_memory: 175  # ~70B models
+
+huge:
+  memory: 30
+  time: "1:00:00"
+  estimated_model_memory: 300  # ~70B+ models

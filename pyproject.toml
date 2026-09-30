@@ -1,0 +1,40 @@
+[project]
+name = "slurm-llm"
+version = "0.6.1"
+description = "Serve open LLMs with vLLM on Slurm clusters and use them locally through an OpenAI-compatible API."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp>=3.12.15",
+    "click>=8.3.1",
+    "httpx>=0.27",
+    "openai>=1.101.0",
+    "psutil>=7.0.0",
+    "pyyaml>=6.0.3",
+    "rich>=14.2.0",
+    "rich-click>=1.9.4",
+    "clusterscheduler @ git+https://github.com/narunraman/rclust",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
+
+[project.scripts]
+sllm = "slurm_llm.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/narunraman/slurm-llm"
+
+[tool.setuptools.package-data]
+slurm_llm = [
+    "templates/*",
+    "configs/*",
+]
+
+[build-system]
+requires = ["setuptools>=77.0", "wheel"]
+build-backend = "setuptools.build_meta"
