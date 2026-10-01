@@ -22,7 +22,7 @@ def test_clusters_merge_rclust_and_slurm_llm_settings(loader):
 
     b = clusters["cluster-b"]
     assert b.user is None and b.account is None
-    assert b.remote_root == "~/remote-llm"  # default
+    assert b.remote_root == "~/slurm-llm"  # default
     assert b.gpu_allocation_mode == "flexible"
     assert [(g.type, g.slurm_spec) for g in b.gpu_types] == [("l40s", "l40s")]  # defined only in clusters.yaml
 

@@ -142,7 +142,7 @@ class ClusterConfig:
     host: str
     user: str | None = None  # None: whatever ~/.ssh/config says
     account: str | None = None
-    remote_root: str | None = None  # job scripts, logs and endpoint files (default ~/remote-llm)
+    remote_root: str | None = None  # job scripts, logs and endpoint files (default ~/slurm-llm)
     model_path: str | None = None  # Hugging Face cache directory for model weights (and the venv)
     slurm_template: str = "vllm.slurm"
     setup_template: str = "setup_venv.sh"
@@ -273,7 +273,7 @@ class ConfigLoader:
                 host=base.get("host") or name,
                 user=base.get("user"),
                 account=extra.get("account", base.get("account")),
-                remote_root=extra.get("remote_root") or "~/remote-llm",
+                remote_root=extra.get("remote_root") or "~/slurm-llm",
                 model_path=extra.get("model_path"),
                 slurm_template=extra.get("slurm_template", "vllm.slurm"),
                 setup_template=extra.get("setup_template", "setup_venv.sh"),

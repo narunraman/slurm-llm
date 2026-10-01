@@ -67,7 +67,7 @@ This writes `~/.config/slurm-llm/` with an entry per cluster in `clusters.yaml`.
 ```yaml
 clusters:
   cluster-a:
-    remote_root: ~/remote-llm        # job scripts and logs
+    remote_root: ~/slurm-llm         # job scripts and logs
     model_path: $SCRATCH/models      # model weights and the Python environment: needs space
     setup_commands:                  # optional, run before creating the environment and in each job
       - module load python/3.12 cuda/12.4

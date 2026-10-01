@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-10-01
+
+### Changed
+- The default `remote_root` (where job scripts, logs and endpoint files go on a cluster) is now
+  `~/slurm-llm` instead of `~/remote-llm`. Clusters with `remote_root` set in `clusters.yaml` are
+  not affected. If you relied on the old default, either add `remote_root: ~/remote-llm` to that
+  cluster's entry or move the folder on the cluster.
+
 ## [0.6.1] - 2026-09-30
 
 Fixes from an end-to-end test on a cluster.

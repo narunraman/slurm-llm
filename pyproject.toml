@@ -1,6 +1,6 @@
 [project]
 name = "slurm-llm"
-version = "0.6.1"
+version = "0.6.2"
 description = "Serve open LLMs with vLLM on Slurm clusters and use them locally through an OpenAI-compatible API."
 readme = "README.md"
 license = "MIT"

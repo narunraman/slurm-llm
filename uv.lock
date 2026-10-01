@@ -922,7 +922,7 @@ wheels = [
 
 [[package]]
 name = "slurm-llm"
-version = "0.6.1"
+version = "0.6.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

@@ -7,9 +7,9 @@
 
 clusters:
   cluster-a:
-    # Where job scripts, logs and endpoint files go (default ~/remote-llm). `~` and
+    # Where job scripts, logs and endpoint files go (default ~/slurm-llm). `~` and
     # environment variables such as $SCRATCH are expanded on the cluster.
-    remote_root: ~/remote-llm
+    remote_root: ~/slurm-llm
     # Hugging Face cache for model weights, and home of the Python environment
     # (<model_path>/.venv). Models are large: pick a filesystem with room, e.g. scratch or project space.
     model_path: $SCRATCH/models

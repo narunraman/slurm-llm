@@ -194,7 +194,7 @@ def init(force: bool, copy_templates: bool):
         for name, base in rclust_clusters.items():
             lines += [
                 f"  {name}:",
-                "    remote_root: ~/remote-llm",
+                "    remote_root: ~/slurm-llm",
                 "    model_path:          # required: directory with room for model weights, e.g. $SCRATCH/models",
                 "    setup_commands: []   # e.g. [\"module load python/3.12 cuda/12.4\"]",
             ]
