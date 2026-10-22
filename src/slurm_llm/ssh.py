@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_PERSIST = "1h"  # how long an idle master connection stays open (ssh ControlPersist)
 # Printed before a command in a login shell; anything a site profile prints before it is dropped
 OUTPUT_MARKER = "SLURM_LLM_OUTPUT_START"
-SLURM_HINT = "slurm-llm runs Slurm's commands in a login shell; check that `bash -lc squeue` works on {name}."
+SLURM_HINT = "Check that `bash -lc {command}` works on {name}."
 
 
 # Slurm's own messages when it is missing or not configured (failures that retrying cannot fix)
@@ -215,7 +215,8 @@ class SSHClient:
             return f"could not check ({err.strip() or f'exit code {code}'})"
         missing = out.split()
         if missing:
-            return f"{', '.join(missing)} not found, even in a login shell"
+            hint = SLURM_HINT.format(command=missing[0], name=self.config.name)
+            return f"{', '.join(missing)} not found, even in a login shell. {hint}"
         return None
 
     def _job_ids_named(self, job_name: str) -> set[str] | None:
@@ -245,7 +246,7 @@ class SSHClient:
                 return line.split()[-1]
         reason = err.strip() or out.strip() or f"exit code {code}"
         if any(s in reason.lower() for s in SLURM_MISSING):
-            raise SlurmUnavailableError(f"sbatch failed on {name}: {reason}. {SLURM_HINT.format(name=name)}")
+            raise SlurmUnavailableError(f"sbatch failed on {name}: {reason}. {SLURM_HINT.format(command='sbatch', name=name)}")
         if code not in (0, -1, 255) and not any(s in reason.lower() for s in SLURM_BUSY):
             raise RemoteLLMError(f"sbatch failed on {name}: {reason}")  # Slurm refused the job
 
@@ -308,7 +309,7 @@ class SSHClient:
             name = self.config.name
             raise SlurmUnavailableError(
                 f"Could not check job {job_id} on {name}: {err.strip()}. The job has not been cancelled. "
-                + SLURM_HINT.format(name=name)
+                + SLURM_HINT.format(command=command, name=name)
             )
 
     def _unknown_status(self, reason: str) -> tuple[str, None, None]:

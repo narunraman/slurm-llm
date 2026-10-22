@@ -191,6 +191,7 @@ print(result.job_ids, result.after_any_dependency, result.nodes_dir)
 ## Troubleshooting
 
 - **"not connected to CLUSTER"**: run `sllm connect CLUSTER`. Check with `sllm connect --status`.
+- **"Could not check job ... for 2 minutes"**: Slurm on that cluster did not answer (it is sometimes busy). The job keeps running; `sllm prepare` picks it up again when you rerun it. To wait longer, set `SLURM_LLM_BUSY_TIMEOUT` (seconds).
 - **Job fails immediately**: `sllm prepare` shows the end of the job's log. Common causes are a missing `account`, a wrong GPU type name (`slurm_spec`), or `setup_commands` that load a different Python than `setup` used.
 - **CUDA out of memory / KV cache errors**: set `max_model_len` for the model, or `model_memory_gb` to request more GPU memory (`sllm config model NAME`); `prepare` offers this when it happens.
 - **The proxy cannot reach a model**: the port forward goes from the login node to the compute node; some sites block this, in which case run your client on the cluster and use `RemoteLLM(local=True)`.

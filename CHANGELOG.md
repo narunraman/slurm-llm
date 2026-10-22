@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - a lost SSH connection stops with what to do; in a terminal, `sllm prepare` logs in again
     (answering two-factor prompts) and resumes waiting for the same job;
   - Slurm missing or unconfigured on the login node stops with an error naming the problem;
-  - a busy Slurm controller or accounting database is retried, for up to 10 minutes in a row.
+  - a busy Slurm controller or accounting database is retried, for up to 2 minutes in a row
+    (`SLURM_LLM_BUSY_TIMEOUT`, in seconds, or `OrchestratorConfig(slurm_busy_timeout=...)`).
   None of these makes `sllm prepare` replace a job it could not check.
 - When `sbatch`'s answer is lost (a timeout or dropped connection), the queue is checked for the
   job before reporting a failure, so retrying does not start a second job.

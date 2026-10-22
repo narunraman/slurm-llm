@@ -267,8 +267,6 @@ def connect(clusters: tuple, persist: str | None, status: bool):
         console.print(table)
         return
 
-    from .ssh import SLURM_HINT
-
     failed = []
     for name, cfg in targets.items():
         client = SSHClient(cfg)
@@ -285,7 +283,7 @@ def connect(clusters: tuple, persist: str | None, status: bool):
             failed.append(name)
             continue
         if problem:
-            err_console.print(f"[red]✗[/red] {name}: Slurm: {problem}. {SLURM_HINT.format(name=name)}", highlight=False)
+            err_console.print(f"[red]✗[/red] {name}: Slurm: {problem}", highlight=False)
             failed.append(name)
     if failed:
         sys.exit(1)
