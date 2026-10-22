@@ -43,7 +43,7 @@ def test_uses_rclusts_socket_and_destination(client, tmp_path):
 
 def test_commands_never_prompt_and_reuse_the_master(client, monkeypatch, completed):
     calls = _record(monkeypatch, completed, [(0, "out", "")])
-    assert client.execute_command("hostname", input="secret") == (0, "out", "")
+    assert client.execute_command("hostname", input="secret", use_login_shell=False) == (0, "out", "")
     cmd, kwargs = calls[0]
     assert cmd[:1] == ["ssh"] and cmd[-2:] == ["alice@hpc1.example.org", "hostname"]
     assert "BatchMode=yes" in cmd and "ControlMaster=no" in cmd
@@ -51,10 +51,19 @@ def test_commands_never_prompt_and_reuse_the_master(client, monkeypatch, complet
     assert kwargs["input"] == "secret"  # secrets go over stdin, not the command line
 
 
-def test_login_shell_wrapping(client, monkeypatch, completed):
+def test_commands_run_in_a_login_shell_by_default(client, monkeypatch, completed):
+    # on some clusters only the login profile puts Slurm on the PATH and sets SLURM_CONF and $SCRATCH
     calls = _record(monkeypatch, completed, [])
-    client.execute_command("sbatch 'x y'", use_login_shell=True)
-    assert calls[0][0][-1] == "bash -l -c 'sbatch '\"'\"'x y'\"'\"''"
+    client.execute_command("sbatch 'x y'")
+    assert calls[0][0][-1] == "bash -l -c 'echo SLURM_LLM_OUTPUT_START; sbatch '\"'\"'x y'\"'\"''"
+
+
+def test_login_shell_drops_what_the_profile_prints(client, monkeypatch, completed):
+    _record(monkeypatch, completed, [(0, "Welcome to the cluster!\nSLURM_LLM_OUTPUT_START\nRUNNING|gpu3|1:00\n", "")])
+    assert client.execute_command("squeue")[1] == "RUNNING|gpu3|1:00\n"
+    # no marker (e.g. the profile exited early): the output is passed on unchanged
+    _record(monkeypatch, completed, [(1, "oops\n", "")])
+    assert client.execute_command("squeue")[1] == "oops\n"
 
 
 def test_not_connected_error_names_the_fix(client, monkeypatch, completed):
@@ -88,12 +97,20 @@ def test_job_status(client, monkeypatch, completed):
     _record(monkeypatch, completed, [(255, "", "Connection reset")])
     assert client.get_job_status("7")[0] == "UNKNOWN"
 
+    # a failed check is not a finished job (e.g. Slurm not on the PATH, or no SLURM_CONF)
+    _record(monkeypatch, completed, [(127, "", "bash: squeue: command not found")])
+    assert client.get_job_status("7")[0] == "UNKNOWN"
+    _record(monkeypatch, completed, [(1, "", "squeue: fatal: Could not establish a configuration source")])
+    assert client.get_job_status("7")[0] == "UNKNOWN"
+    _record(monkeypatch, completed, [(0, "", ""), (1, "", "sacct: error: Problem talking to the database")])
+    assert client.get_job_status("7")[0] == "UNKNOWN"
+
 
 def test_submit_uploads_over_stdin_and_parses_the_job_id(client, monkeypatch, completed):
     calls = _record(monkeypatch, completed, [(0, "", ""), (0, "Submitted batch job 123\n", "")])
     assert client.submit_slurm_job("#!/bin/bash\n", "/home/alice/llm/job.slurm") == "123"
     assert calls[0][1]["input"] == "#!/bin/bash\n"
-    assert calls[1][0][-1].startswith("bash -l -c 'sbatch ")
+    assert calls[1][0][-1].startswith("bash -l -c 'echo SLURM_LLM_OUTPUT_START; sbatch ")
 
 
 def test_streaming_hides_the_shared_connection_closed_message(client, monkeypatch, completed):

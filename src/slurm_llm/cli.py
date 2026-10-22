@@ -325,7 +325,7 @@ def setup(cluster_names: tuple):
             # A script can exit 0 without having installed anything (e.g. a custom template without
             # `set -e`), so check the environment the way jobs use it before reporting "ready".
             check = "\n".join([*cfg.setup_commands, f"{shell_path(venv)}/bin/python -c 'import vllm, huggingface_hub'"])
-            code, _, err = client.execute_command(check, timeout=300, use_login_shell=True)
+            code, _, err = client.execute_command(check, timeout=300)
             if code != 0:
                 detail = err.strip().splitlines()[-1] if err.strip() else f"exit code {code}"
                 raise RuntimeError(f"vLLM is not importable from {venv} after setup: {detail}")

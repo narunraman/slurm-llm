@@ -158,7 +158,7 @@ class JobManager:
         """Refresh active jobs with one squeue call per cluster (updates `jobs` in place).
 
         Jobs missing from a successful squeue get their final state from sacct (NOT_FOUND if it
-        does not know them); clusters that could not be queried are left alone.
+        does not know them); jobs on clusters that could not be queried keep their cached state.
         """
         from .ssh_manager import execute_parallel
 
@@ -179,6 +179,10 @@ class JobManager:
         for cluster_name, (exit_code, stdout, stderr) in results.items():
             # squeue exits 1 with "Invalid job id" when every listed job has left the queue
             if exit_code != 0 and "invalid job id" not in stderr.lower():
+                logger.warning(
+                    f"Could not refresh jobs on {cluster_name} (squeue failed: "
+                    f"{stderr.strip() or f'exit code {exit_code}'}); showing their last known state"
+                )
                 continue
             found = set()
             for line in stdout.strip().splitlines():
@@ -197,8 +201,8 @@ class JobManager:
         """Give jobs that have left the queue their final state from Slurm accounting.
 
         `gone` maps clusters to job ids. The state is sacct's (COMPLETED, CANCELLED, FAILED,
-        TIMEOUT, OUT_OF_MEMORY, NODE_FAIL, ...), or NOT_FOUND when sacct does not know the job (or
-        cannot be asked). The time left no longer applies.
+        TIMEOUT, OUT_OF_MEMORY, NODE_FAIL, ...), or NOT_FOUND when sacct does not know the job. If
+        sacct fails, the jobs keep their cached state. The time left no longer applies.
         """
         from .ssh_manager import execute_parallel
 
@@ -206,13 +210,18 @@ class JobManager:
         commands = {name: f"sacct -j {shlex.quote(','.join(ids))} -X -n -P -o JobID,State" for name, ids in gone.items()}
         results = execute_parallel({n: ssh_clients[n] for n in gone}, commands, timeout=30)
         for cluster_name, ids in gone.items():
-            exit_code, stdout, _ = results.get(cluster_name, (1, "", ""))
+            exit_code, stdout, stderr = results.get(cluster_name, (1, "", ""))
+            if exit_code != 0:
+                logger.warning(
+                    f"Could not get the final state of jobs on {cluster_name} (sacct failed: "
+                    f"{stderr.strip() or f'exit code {exit_code}'}); showing their last known state"
+                )
+                continue
             final = {}
-            if exit_code == 0:
-                for line in stdout.splitlines():
-                    job_id, _, state = line.partition("|")
-                    if state.split():
-                        final[job_id.strip()] = state.split()[0]  # "CANCELLED by 1234" -> CANCELLED
+            for line in stdout.splitlines():
+                job_id, _, state = line.partition("|")
+                if state.split():
+                    final[job_id.strip()] = state.split()[0]  # "CANCELLED by 1234" -> CANCELLED
             for job_id in ids:
                 jobs[job_id].status = final.get(job_id, "NOT_FOUND")
                 jobs[job_id].time_left = None
@@ -365,8 +374,9 @@ class JobManager:
         seen: set[str] = set()
         answered: set[str] = set()
 
-        for cluster_name, (exit_code, stdout, _) in results.items():
+        for cluster_name, (exit_code, stdout, stderr) in results.items():
             if exit_code != 0:
+                logger.warning(f"Could not list jobs on {cluster_name}: {stderr.strip() or f'exit code {exit_code}'}")
                 continue
             answered.add(cluster_name)
             now = re.search(r"SLURM_LLM_NOW (\d+) (\S+)", stdout)

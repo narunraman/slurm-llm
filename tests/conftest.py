@@ -99,7 +99,7 @@ class FakeSSH:
         self.destination = self.config.host
         self.ssh_master_socket = "/tmp/sock"
 
-    def execute_command(self, command, timeout=30, use_login_shell=False, input=None):
+    def execute_command(self, command, timeout=30, use_login_shell=True, input=None):
         self.commands.append(command)
         self.inputs.append(input)
         for needle, result in self.responses:
