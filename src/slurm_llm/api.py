@@ -18,7 +18,7 @@ class SubmitResult:
     model_name: str  # served model name, e.g. "Qwen2.5-7B-Instruct"
     cluster_name: str
     job_ids: list[str] = field(default_factory=list)
-    nodes_dir: str = ""  # where the jobs write <job_id>.node files (for RemoteLLM(local=True))
+    nodes_dir: str = ""  # where the jobs write <job_id>.node files (for SlurmLLM(local=True))
     remote_root: str = ""
 
     @property

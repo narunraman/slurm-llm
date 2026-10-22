@@ -57,7 +57,7 @@ source "$VENV/bin/activate" || {{ echo "ERROR: could not activate $VENV"; exit 1
 echo "Model: {model_name} ($MODEL_DIR)"
 echo "Job $SLURM_JOB_ID on $SLURMD_NODENAME, {num_gpus} GPU(s), port $PORT"
 
-# Endpoint file for clients running on the cluster (RemoteLLM(local=True))
+# Endpoint file for clients running on the cluster (SlurmLLM(local=True))
 NODE_DIR="{output_dir}/manifests/{model_name}/nodes"
 NODE_FILE="$NODE_DIR/$SLURM_JOB_ID.node"
 mkdir -p "$NODE_DIR"

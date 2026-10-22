@@ -6,11 +6,11 @@ from unittest.mock import patch
 
 import pytest
 
-from slurm_llm.client import RemoteLLM
+from slurm_llm.client import SlurmLLM
 
 
-def _client(endpoint_count: int, generate) -> RemoteLLM:
-    client = RemoteLLM.__new__(RemoteLLM)
+def _client(endpoint_count: int, generate) -> SlurmLLM:
+    client = SlurmLLM.__new__(SlurmLLM)
     client._openai_client = object()
     client._tunnel_handle = None
     client._tunnel_registry = None

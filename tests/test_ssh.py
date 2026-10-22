@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from slurm_llm.config import RemoteLLMError
+from slurm_llm.config import SlurmLLMError
 from slurm_llm.ssh import NotConnectedError, SlurmUnavailableError, SSHClient, shell_path
 
 
@@ -165,7 +165,7 @@ def connected(monkeypatch):
 def test_sbatch_refusal_is_reported_without_looking_further(client, monkeypatch, completed, connected):
     err = "sbatch: error: Batch job submission failed: Invalid account or account/partition combination specified"
     calls = _record(monkeypatch, completed, [(0, "", ""), (0, "", ""), (1, "", err)])
-    with pytest.raises(RemoteLLMError, match="Invalid account"):
+    with pytest.raises(SlurmLLMError, match="Invalid account"):
         client.submit_slurm_job(SCRIPT, "~/x.slurm")
     assert len(calls) == 3  # upload, queue before, sbatch
 
@@ -179,7 +179,7 @@ def test_sbatch_without_an_answer_finds_the_job_it_submitted(client, monkeypatch
 
 def test_sbatch_without_an_answer_and_no_new_job(client, monkeypatch, completed, connected):
     _record(monkeypatch, completed, [(0, "", ""), (0, "", ""), (1, "", "Socket timed out")] + [(0, "", "")] * 3)
-    with pytest.raises(RemoteLLMError, match="not in the queue. Check `squeue -u \\$USER`"):
+    with pytest.raises(SlurmLLMError, match="not in the queue. Check `squeue -u \\$USER`"):
         client.submit_slurm_job(SCRIPT, "~/x.slurm")
 
 

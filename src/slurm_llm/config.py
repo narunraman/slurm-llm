@@ -30,11 +30,11 @@ logger = logging.getLogger(__name__)
 PACKAGE_DIR = Path(__file__).parent
 
 
-class RemoteLLMError(Exception):
+class SlurmLLMError(Exception):
     """An expected failure with a message meant for the user (no traceback needed)."""
 
 
-class ConfigError(RemoteLLMError, ValueError):
+class ConfigError(SlurmLLMError, ValueError):
     """A configuration file is missing or invalid."""
 
 
@@ -470,3 +470,11 @@ def _merge_gpu_types(cluster: str, base: list, extra: list) -> list[GPUType]:
             )
         )
     return merged
+
+
+def __getattr__(name):
+    if name == "RemoteLLMError":  # old name
+        from . import _renamed
+
+        return _renamed(__name__, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

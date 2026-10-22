@@ -17,7 +17,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from .config import ClusterConfig, ConfigError, RemoteLLMError
+from .config import ClusterConfig, ConfigError, SlurmLLMError
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ SLURM_COMMANDS = ("sbatch", "squeue", "sacct", "scancel")
 SLURM_BUSY = ("timed out", "unable to contact", "connection", "temporarily unavailable", "try again")
 
 
-class NotConnectedError(RemoteLLMError):
+class NotConnectedError(SlurmLLMError):
     """No usable SSH connection to a cluster."""
 
     def __init__(self, message: str, cluster: str | None = None):
@@ -42,11 +42,11 @@ class NotConnectedError(RemoteLLMError):
         self.cluster = cluster
 
 
-class SlurmUnavailableError(RemoteLLMError):
+class SlurmUnavailableError(SlurmLLMError):
     """Slurm's commands are missing or not configured on a cluster's login node."""
 
 
-class StatusUnknownError(RemoteLLMError):
+class StatusUnknownError(SlurmLLMError):
     """A job's status could not be checked for too long (the job itself may be fine)."""
 
 
@@ -186,7 +186,7 @@ class SSHClient:
         code, out, err = self.execute_command(f"mkdir -p {shell_path(path)} && cd {shell_path(path)} && pwd")
         lines = out.strip().splitlines()
         if code != 0 or not lines:
-            raise RemoteLLMError(f"Could not create {path} on {self.config.name}: {err.strip() or f'exit code {code}'}")
+            raise SlurmLLMError(f"Could not create {path} on {self.config.name}: {err.strip() or f'exit code {code}'}")
         return lines[-1]
 
     def lost_connection(self, doing: str) -> NotConnectedError:
@@ -236,7 +236,7 @@ class SSHClient:
         if self._connection_lost(code):
             raise self.lost_connection("uploading the job script (no job was submitted)")
         if code != 0:
-            raise RemoteLLMError(f"Could not upload the job script to {name}: {err.strip()}")
+            raise SlurmLLMError(f"Could not upload the job script to {name}: {err.strip()}")
         job_name = re.search(r"^#SBATCH\s+(?:--job-name[= ]|-J\s*)(\S+)", script_content, re.MULTILINE)
         before = self._job_ids_named(job_name.group(1)) if job_name else None
 
@@ -248,7 +248,7 @@ class SSHClient:
         if any(s in reason.lower() for s in SLURM_MISSING):
             raise SlurmUnavailableError(f"sbatch failed on {name}: {reason}. {SLURM_HINT.format(command='sbatch', name=name)}")
         if code not in (0, -1, 255) and not any(s in reason.lower() for s in SLURM_BUSY):
-            raise RemoteLLMError(f"sbatch failed on {name}: {reason}")  # Slurm refused the job
+            raise SlurmLLMError(f"sbatch failed on {name}: {reason}")  # Slurm refused the job
 
         # The answer was lost: look for the job in the queue
         if self._connection_lost(code):
@@ -268,7 +268,7 @@ class SSHClient:
                     job_id = new.pop()
                     logger.warning(f"sbatch on {name} did not answer ({reason}), but job {job_id} is in the queue; using it")
                     return job_id
-        raise RemoteLLMError(
+        raise SlurmLLMError(
             f"sbatch on {name} did not answer ({reason}) and the job is not in the queue. "
             f"Check `squeue -u $USER` on {name} before running the command again, to avoid a second job."
         )

@@ -25,7 +25,7 @@ from .tunnels import TunnelHandle, TunnelRegistry
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["RemoteLLM", "TunnelHandle", "TunnelRegistry"]
+__all__ = ["SlurmLLM", "TunnelHandle", "TunnelRegistry"]
 
 
 def _model_ids_match(expected: str, actual: str) -> bool:
@@ -60,7 +60,7 @@ def _check_batch_requests(requests: Any) -> None:
         raise TypeError(f"{_BATCH_FORMAT}; request {idx} is {type(request).__name__}{hint}")
 
 
-class RemoteLLM:
+class SlurmLLM:
     """Client for remote vLLM models with automatic job management and tunneling.
 
     Handles:
@@ -72,7 +72,7 @@ class RemoteLLM:
 
     Examples:
         # Basic usage (from your machine, uses SSH tunneling)
-        client = RemoteLLM(model="llama-3.1-8b-instruct")
+        client = SlurmLLM(model="llama-3.1-8b-instruct")
         client.ensure_ready()  # Blocks until model is ready
 
         response = client.generate(
@@ -82,7 +82,7 @@ class RemoteLLM:
         print(response.choices[0].message.content)
 
         # Local mode (from cluster compute node, direct HTTP)
-        client = RemoteLLM(
+        client = SlurmLLM(
             model="qwen-7b",
             local=True,
             load_balance=True,
@@ -98,7 +98,7 @@ class RemoteLLM:
         ])
 
         # Context manager (auto-cleanup)
-        with RemoteLLM(model="llama-3.1-8b-instruct") as client:
+        with SlurmLLM(model="llama-3.1-8b-instruct") as client:
             client.ensure_ready()
             response = client.generate(messages=[...])
     """
@@ -115,7 +115,7 @@ class RemoteLLM:
         job_ids: list[str] | None = None,  # Explicit job IDs (local mode)
         nodes_dir: str | None = None,  # Path to nodes/ directory (local mode)
     ):
-        """Initialize RemoteLLM client.
+        """Initialize SlurmLLM client.
 
         Args:
             model: Model name with optional instance (e.g., "llama-70b" or "llama-70b:1")
@@ -824,7 +824,7 @@ class RemoteLLM:
     ):
         """Generate a chat completion.
 
-        This is the primary API for RemoteLLM. It abstracts over the underlying
+        This is the primary API for SlurmLLM. It abstracts over the underlying
         vLLM/OpenAI endpoint and automatically uses the correct model name.
 
         In load_balance mode, requests are distributed across available instances.
@@ -1240,3 +1240,11 @@ class RemoteLLM:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit - cleanup tunnel."""
         self.close()
+
+
+def __getattr__(name):
+    if name == "RemoteLLM":  # old name
+        from . import _renamed
+
+        return _renamed(__name__, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
