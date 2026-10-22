@@ -133,6 +133,18 @@ def test_refresh_and_discovery_agree_on_finished_jobs(manager, loader, fake_ssh)
     assert refreshed["1"].status == discovered["1"].status == "FAILED"
 
 
+def test_failed_slurm_commands_keep_the_last_known_state(manager, fake_ssh, caplog):
+    # e.g. squeue/sacct not on the PATH: a failed check must not look like a finished job
+    _jobs(manager, ("1", "cluster-a", "RUNNING"), ("2", "cluster-b", "RUNNING"))
+    clients = {
+        "cluster-a": fake_ssh(responses=[("squeue", (127, "", "bash: squeue: command not found"))]),
+        "cluster-b": fake_ssh(responses=[("squeue", (0, "", "")), ("sacct", (1, "", "sacct: error: no database"))]),
+    }
+    jobs = manager.list_jobs(ssh_clients=clients)
+    assert jobs["1"].status == jobs["2"].status == "RUNNING"
+    assert "squeue: command not found" in caplog.text and "sacct: error: no database" in caplog.text
+
+
 def test_refresh_treats_invalid_job_id_as_gone(manager, fake_ssh):
     _jobs(manager, ("1", "cluster-a", "RUNNING"))
     clients = {"cluster-a": fake_ssh(responses=[("squeue", (1, "", "slurm_load_jobs error: Invalid job id specified"))])}

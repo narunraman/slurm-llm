@@ -138,7 +138,7 @@ class _SetupSSH:
         self.streamed.append(command)
         return 0
 
-    def execute_command(self, command, timeout=30, use_login_shell=False, input=None):
+    def execute_command(self, command, timeout=30, use_login_shell=True, input=None):
         self.commands.append((command, use_login_shell))
         if "import vllm" in command:
             return (0, "", "") if self.import_ok else (1, "", "Traceback ...\nModuleNotFoundError: No module named 'vllm'\n")

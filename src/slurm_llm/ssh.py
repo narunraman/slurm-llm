@@ -20,6 +20,8 @@ from .config import ClusterConfig, ConfigError, RemoteLLMError
 logger = logging.getLogger(__name__)
 
 DEFAULT_PERSIST = "1h"  # how long an idle master connection stays open (ssh ControlPersist)
+# Printed before a command in a login shell; anything a site profile prints before it is dropped
+OUTPUT_MARKER = "SLURM_LLM_OUTPUT_START"
 
 
 class NotConnectedError(RemoteLLMError):
@@ -114,16 +116,17 @@ class SSHClient:
         self,
         command: str,
         timeout: int = 30,
-        use_login_shell: bool = False,
+        use_login_shell: bool = True,
         input: str | None = None,
     ) -> tuple[int, str, str]:
         """Run a command on the login node. Returns (exit code, stdout, stderr); never prompts.
 
         `input` is sent on stdin (use it for secrets, which must not appear in command lines).
-        With `use_login_shell`, the command runs under `bash -l` so site profiles are loaded.
+        With `use_login_shell` (the default), the command runs under `bash -l` so site profiles are
+        loaded: on some clusters only they put Slurm on the PATH and set SLURM_CONF and $SCRATCH.
         """
         if use_login_shell:
-            command = f"bash -l -c {shlex.quote(command)}"
+            command = f"bash -l -c {shlex.quote(f'echo {OUTPUT_MARKER}; {command}')}"
         cmd = self._ssh("-o", "BatchMode=yes", "-o", "ControlMaster=no") + [self.destination, command]
         try:
             result = subprocess.run(cmd, input=input, capture_output=True, text=True, timeout=timeout)
@@ -131,11 +134,14 @@ class SSHClient:
             return -1, "", "Command timed out"
         except OSError as e:
             return -1, "", str(e)
-        stderr = result.stderr
+        stdout, stderr = result.stdout, result.stderr
+        if use_login_shell:
+            _, found, rest = stdout.partition(OUTPUT_MARKER + "\n")
+            stdout = rest if found else stdout
         if result.returncode == 255 and not self.has_active_connection():
             detail = stderr.strip().splitlines()[-1] if stderr.strip() else "ssh failed"
             stderr = f"not connected to {self.config.name} ({detail}); run `sllm connect {self.config.name}`"
-        return result.returncode, result.stdout, stderr
+        return result.returncode, stdout, stderr
 
     def execute_command_streaming(self, command: str, timeout: int = 300) -> int:
         """Run a command with its output shown live in the terminal. Returns the exit code.
@@ -164,7 +170,7 @@ class SSHClient:
         code, _, err = self.execute_command(f"cat > {shell_path(remote_script_path)}", input=script_content)
         if code != 0:
             raise RemoteLLMError(f"Could not upload the job script to {self.config.name}: {err.strip()}")
-        code, out, err = self.execute_command(f"sbatch {shell_path(remote_script_path)}", use_login_shell=True)
+        code, out, err = self.execute_command(f"sbatch {shell_path(remote_script_path)}")
         for line in out.splitlines():
             if "Submitted batch job" in line:
                 return line.split()[-1]
@@ -174,21 +180,25 @@ class SSHClient:
         """(state, node, time left) of a Slurm job.
 
         State is Slurm's (e.g. PENDING, RUNNING, COMPLETED, OUT_OF_MEMORY), NOT_FOUND when Slurm no
-        longer knows the job, or UNKNOWN when the cluster could not be asked.
+        longer knows the job, or UNKNOWN when the cluster could not be asked (including when squeue
+        or sacct fail, e.g. because Slurm is not on the PATH: a failed check is not a finished job).
         """
         job = shlex.quote(str(job_id))
-        code, out, _ = self.execute_command(f"squeue -j {job} -h -o '%T|%N|%L'")
+        code, out, err = self.execute_command(f"squeue -j {job} -h -o '%T|%N|%L'")
         if code == 0 and out.strip():
             parts = out.strip().splitlines()[0].split("|")
             node = parts[1] if len(parts) > 1 and parts[1] else None
             time_left = parts[2] if len(parts) > 2 and parts[2] else None
             return parts[0], node, time_left
-        if code in (-1, 255):
+        # squeue exits 1 with "Invalid job id" once the job has left the queue
+        if code != 0 and "invalid job id" not in err.lower():
+            logger.warning(f"squeue failed on {self.config.name}: {err.strip() or f'exit code {code}'}")
             return "UNKNOWN", None, None
-        code, out, _ = self.execute_command(f"sacct -j {job} -X -n -P -o State")
+        code, out, err = self.execute_command(f"sacct -j {job} -X -n -P -o State")
         if code == 0 and out.strip():
             return out.split()[0], None, None
-        if code in (-1, 255):
+        if code != 0:
+            logger.warning(f"sacct failed on {self.config.name}: {err.strip() or f'exit code {code}'}")
             return "UNKNOWN", None, None
         return "NOT_FOUND", None, None
 
