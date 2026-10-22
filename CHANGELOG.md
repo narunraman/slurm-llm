@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Templates say where they come from (#1). `sllm config validate` lists each cluster's job and
+  setup template (built-in, or your copy and whether you edited it); `sllm setup`, `submit` and
+  `prepare` say when they use your copy; each job records its template and fingerprint.
+- Copies made by `sllm init --templates` follow new versions of slurm-llm: a copy you never edited
+  is updated to the new built-in template (with a message), and an edited copy is kept, with one
+  warning per new built-in version and the command to compare them.
+
 ### Changed
 - `RemoteLLM` is now `SlurmLLM`, and `RemoteLLMError` is now `SlurmLLMError`: the client also runs
   on the cluster itself (`local=True`), so "remote" no longer described it. The old names still

@@ -1,5 +1,6 @@
 """The command-line interface: fast start, clear errors, exit codes."""
 
+import json
 import stat
 import subprocess
 import sys
@@ -237,3 +238,18 @@ def test_config_validate_warns_about_clusters_missing_from_either_config(run, is
     output = " ".join(run("config", "validate").output.split())
     assert "cluster 'cluster-c' is not in rclust's config" in output
     assert "cluster 'cluster-b' (from rclust's config) has no entry in clusters.yaml" in output
+
+
+def test_template_sources_are_shown_and_copies_recorded(run, isolated_home):
+    result = run("config", "validate")
+    output = " ".join(result.output.split())
+    assert "cluster-a: job template vllm.slurm: built-in" in output
+    assert "cluster-a: setup template setup_venv.sh: built-in" in output
+
+    assert run("init", "--templates").exit_code == 0
+    templates = isolated_home / ".config/slurm-llm/templates"
+    assert set(json.loads((templates / ".slurm-llm-templates.json").read_text())) == {"setup_venv.sh", "vllm.slurm"}
+    (templates / "vllm.slurm").write_text((templates / "vllm.slurm").read_text() + "# mine\n")
+    output = " ".join(run("config", "validate").output.split())
+    assert "cluster-a: job template vllm.slurm: your copy ~/.config/slurm-llm/templates/vllm.slurm (edited)" in output
+    assert "setup template setup_venv.sh: your copy ~/.config/slurm-llm/templates/setup_venv.sh (same as the built-in)" in output

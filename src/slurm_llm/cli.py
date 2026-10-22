@@ -206,6 +206,8 @@ def init(force: bool, copy_templates: bool):
         write("clusters.yaml", "\n".join(lines) + "\n")
 
     if copy_templates:
+        from .template_source import record_copy
+
         template_dir = user_template_dir()
         template_dir.mkdir(parents=True, exist_ok=True)
         console.print("[bold]Templates[/bold]")
@@ -216,6 +218,7 @@ def init(force: bool, copy_templates: bool):
                     console.print(f"  [dim]kept[/dim]     {dst}")
                 else:
                     shutil.copy(src, dst)
+                    record_copy(template_dir, src.name)  # so an unedited copy can follow future versions
                     console.print(f"  [green]wrote[/green]    {dst}")
 
     token = read_hf_token()
@@ -300,8 +303,9 @@ def setup(cluster_names: tuple):
     """
     from rich.table import Table
 
-    from .config import find_template, read_hf_token, tilde
+    from .config import read_hf_token, tilde
     from .ssh import shell_path
+    from .template_source import resolve_template
 
     loader = _loader()
     targets = _select_clusters(loader, cluster_names)
@@ -312,7 +316,10 @@ def setup(cluster_names: tuple):
         try:
             model_path = _require_model_path(cfg)
             venv = f"{model_path}/.venv"
-            template = find_template(cfg.setup_template)
+            source = resolve_template(cfg.setup_template)
+            template = source.path
+            if source.yours:
+                console.print(f"  [dim]Setup script from {source.describe()}[/dim]")
             try:
                 script = template.read_text().format(
                     venv_path=shell_path(venv), setup_commands="\n".join(cfg.setup_commands)
@@ -528,6 +535,8 @@ def submit(models: tuple, force_cluster: str | None, time: str | None, gpus: str
             gpu = f"{gpu_spec['num_gpus']}x {gpu_spec['type'] or 'GPU'}" if gpu_spec else "1 GPU"
             est = f"{wait // 60} min" if wait is not None else "unknown"
             console.print(f"[green]✓[/green] {label}: job {job_id} on {cluster} ({gpu}, est. wait {est})")
+            if job_manager.last_template and job_manager.last_template.yours:
+                console.print(f"  [dim]Job script from {job_manager.last_template.describe()}[/dim]")
             submitted.append(job_id)
         except Exception as e:
             from .config import SlurmLLMError
@@ -962,10 +971,11 @@ def config_view():
 @click.option("--check-ssh", is_flag=True, help="Also check the SSH connection to each cluster.")
 def config_validate(check_ssh: bool):
     """Check the configuration for mistakes (exits 1 if there are errors)."""
-    from .config import find_template, read_hf_token
+    from .config import read_hf_token
+    from .template_source import resolve_template
 
     loader = _loader()
-    errors, warnings = [], []
+    errors, warnings, templates = [], [], []
     clusters = {}
     try:
         clusters = loader.load_clusters()
@@ -1000,11 +1010,13 @@ def config_validate(check_ssh: bool):
             )
         if cfg.gpu_allocation_mode not in ("per-node", "flexible"):
             errors.append(f"cluster '{name}': gpu_allocation_mode must be per-node or flexible")
-        for template in (cfg.slurm_template, cfg.setup_template):
+        for kind, template in (("job", cfg.slurm_template), ("setup", cfg.setup_template)):
             try:
-                find_template(template)
+                source = resolve_template(template, update=False)
             except Exception as e:
                 errors.append(f"cluster '{name}': {e}")
+                continue
+            templates.append(f"{name}: {kind} template {template}: {source.describe()}")
     try:
         resources = loader.load_resources()
         for model in {m.id: m for m in loader.load_models().values()}.values():
@@ -1032,6 +1044,8 @@ def config_validate(check_ssh: bool):
             except Exception as e:
                 errors.append(str(e))
 
+    for t in templates:
+        console.print(f"[dim]{t}[/dim]", highlight=False)
     for w in warnings:
         console.print(f"[yellow]warning:[/yellow] {w}", highlight=False)
     for e in errors:

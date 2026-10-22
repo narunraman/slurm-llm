@@ -89,16 +89,13 @@ def rclust_config_path() -> Path:
 
 
 def find_template(name: str, template_dir: Path | None = None) -> Path:
-    """A template from ~/.config/slurm-llm/templates (your copies) or else the packaged ones."""
-    candidates = [(template_dir or user_template_dir()) / name, PACKAGE_DIR / "templates" / name]
-    for path in candidates:
-        if path.is_file():
-            return path
-    available = sorted(p.name for p in (PACKAGE_DIR / "templates").iterdir() if p.suffix in (".slurm", ".sh"))
-    raise ConfigError(
-        f"Template '{name}' not found in {candidates[0].parent} or the packaged templates "
-        f"(available: {', '.join(available)})"
-    )
+    """A template from ~/.config/slurm-llm/templates (your copies) or else the packaged ones.
+
+    See template_source.resolve_template, which also says where it came from.
+    """
+    from .template_source import resolve_template
+
+    return resolve_template(name, template_dir).path
 
 
 def read_hf_token() -> str | None:

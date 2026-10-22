@@ -14,7 +14,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .config import ClusterConfig, ConfigError, ModelConfig, ResourceConfig, find_template, state_dir
+from .config import ClusterConfig, ConfigError, ModelConfig, ResourceConfig, state_dir
+from .template_source import TemplateSource, resolve_template
 from .ssh import SSHClient, shell_path
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,8 @@ class JobInfo:
     max_model_len: int | None = None  # as reported by vLLM
     time_left: str | None = None
     instance: int = 0  # to run several copies of one model
+    template: str | None = None  # the job template the script was made from, and its fingerprint
+    template_fingerprint: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -106,6 +109,7 @@ class JobManager:
     def __init__(self, job_store_path: Path | None = None, template_dir: Path | None = None):
         self.job_store_path = Path(job_store_path) if job_store_path else state_dir() / "jobs.json"
         self.template_dir = Path(template_dir) if template_dir else None
+        self.last_template: TemplateSource | None = None  # the job template of the last script made
 
     # --- job cache ------------------------------------------------------------------------------
 
@@ -267,7 +271,9 @@ class JobManager:
         `output_dir` (for logs and endpoint files) must be an absolute path: #SBATCH lines do not
         expand `~` or variables.
         """
-        template_path = find_template(template_name or cluster_config.slurm_template, self.template_dir)
+        source = resolve_template(template_name or cluster_config.slurm_template, self.template_dir)
+        self.last_template = source
+        template_path = source.path
         if not cluster_config.model_path:
             raise ConfigError(
                 f"cluster '{cluster_config.name}' has no model_path; set it in clusters.yaml "
@@ -341,6 +347,7 @@ class JobManager:
         )
         suffix = f"_{instance}" if instance > 0 else ""
         job_id = ssh_client.submit_slurm_job(script, f"{remote_dir}/vllm_{model_config.served_name}{suffix}.slurm")
+        source = self.last_template
         self.save_job(
             JobInfo(
                 job_id=job_id,
@@ -350,6 +357,8 @@ class JobManager:
                 submit_time=datetime.now().isoformat(),
                 gpu_info=gpu_spec,
                 instance=instance,
+                template=str(source.path),
+                template_fingerprint=source.fingerprint,
             )
         )
         return job_id
