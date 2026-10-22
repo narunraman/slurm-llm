@@ -18,8 +18,10 @@ fails on the network file systems that hold home directories on clusters).
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -285,6 +287,62 @@ class ConfigLoader:
                 cpus_per_task=int(extra.get("cpus_per_task", 4)),
             )
         return clusters
+
+    def add_setup_command(self, cluster_name: str, command: str) -> bool:
+        """Append a line to a cluster's setup_commands in clusters.yaml, keeping the file's comments.
+
+        The file is edited as text, then read back: if the result is not exactly the old settings
+        plus this command (e.g. setup_commands is written in an unusual style), the file is left
+        unchanged and False is returned.
+        """
+        path = self.config_dir / "clusters.yaml"
+        if not path.exists():
+            return False
+        text = path.read_text()
+        before = _load_yaml(path).get("clusters") or {}
+        if not isinstance(before.get(cluster_name), dict):
+            return False
+        lines = text.splitlines(keepends=True)
+
+        def indent(line: str) -> int:
+            return len(line) - len(line.lstrip(" "))
+
+        def is_content(line: str) -> bool:
+            return bool(line.strip()) and not line.lstrip().startswith("#")
+
+        # the cluster's block under `clusters:`
+        header = next((i for i, line in enumerate(lines) if re.match(rf"\s+{re.escape(cluster_name)}:\s*(#.*)?$", line)), None)
+        if header is None:
+            return False
+        end = next((i for i in range(header + 1, len(lines))
+                    if is_content(lines[i]) and indent(lines[i]) <= indent(lines[header])), len(lines))
+        body = [i for i in range(header + 1, end) if is_content(lines[i])]
+        key_indent = indent(lines[body[0]]) if body else indent(lines[header]) + 2
+        item = command if yaml.safe_load(f"- {command}") == [command] else json.dumps(command)  # quote only if needed
+        key = next((i for i in body if re.match(r"\s*setup_commands:", lines[i])), None)
+        if key is None:
+            insert_at, new = header + 1, f"{' ' * key_indent}setup_commands:\n{' ' * (key_indent + 2)}- {item}\n"
+        else:
+            items = [i for i in body if i > key and lines[i].lstrip().startswith("- ") and indent(lines[i]) > key_indent]
+            items = [i for i in items if all(indent(lines[j]) > key_indent for j in body if key < j <= i)]
+            if not items:
+                return False  # e.g. a list written as [a, b]
+            insert_at, new = items[-1] + 1, f"{' ' * indent(lines[items[-1]])}- {item}\n"
+        if insert_at > 0 and not lines[insert_at - 1].endswith("\n"):
+            lines[insert_at - 1] += "\n"
+        lines.insert(insert_at, new)
+        edited = "".join(lines)
+
+        try:
+            after = (yaml.safe_load(edited) or {}).get("clusters") or {}
+        except yaml.YAMLError:
+            return False
+        expected = {**before, cluster_name: {**before[cluster_name],
+                    "setup_commands": _as_list(before[cluster_name].get("setup_commands")) + [command]}}
+        if after != expected:
+            return False
+        path.write_text(edited)
+        return True
 
     def get_cluster(self, name: str) -> ClusterConfig:
         clusters = self.load_clusters()

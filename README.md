@@ -86,6 +86,8 @@ sllm setup                     # creates <model_path>/.venv with vLLM (10 minute
 sllm download qwen-3-8b        # downloads to <model_path> on the login node, then scans it
 ```
 
+On clusters that provide their own builds of Python packages in a wheelhouse (listed in pip's settings, as on Alliance Canada), `setup` installs from it only (`pip install --no-index`), as these sites ask. If a package is provided as a module instead (e.g. OpenCV on Alliance), `setup` loads the module and adds it to the cluster's `setup_commands`, so jobs load it too. If a package is missing from the wheelhouse, `sllm setup --from-pypi PACKAGE` (or `all`) allows PyPI for it.
+
 `download` accepts registry names (`sllm models`) or Hugging Face repo ids. For gated models (e.g. Llama), save a [Hugging Face token](https://huggingface.co/settings/tokens) first with `sllm config hf-token` (or set `HF_TOKEN`) and re-run `setup`; the token is sent to the cluster over SSH's standard input, never on a command line.
 
 ### 4. Serve and use models

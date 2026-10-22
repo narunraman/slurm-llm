@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `sllm setup` works on clusters with a managed Python wheelhouse (e.g. Alliance Canada, #2). It
+  finds the wheelhouse in pip's settings and installs from it only (`pip install --no-index`,
+  without uv, which ignores pip's settings). Packages the cluster provides as modules (OpenCV on
+  Alliance) are loaded and added to the cluster's `setup_commands` in `clusters.yaml`, so jobs
+  load them too; the file's comments are kept. If a package is missing from the wheelhouse, setup
+  stops and names `sllm setup --from-pypi PACKAGE` (or `all`) to allow PyPI for it. Other
+  clusters are not affected.
+
 ### Changed
 - `RemoteLLM` is now `SlurmLLM`, and `RemoteLLMError` is now `SlurmLLMError`: the client also runs
   on the cluster itself (`local=True`), so "remote" no longer described it. The old names still
