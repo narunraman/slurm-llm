@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from slurm_llm import orchestration
-from slurm_llm.config import ConfigError, RemoteLLMError
+from slurm_llm.config import ConfigError, SlurmLLMError
 from slurm_llm.job import JobInfo, JobManager
 from slurm_llm.orchestration import JobOrchestrator, OrchestratorConfig
 from slurm_llm.ssh import NotConnectedError, SlurmUnavailableError, StatusUnknownError
@@ -67,7 +67,7 @@ def test_job_that_ends_while_queued_is_reported_with_its_logs(orchestrator, fake
     ssh = fake_ssh(responses=[("tail", (0, "sbatch: error: Invalid account\n", ""))])
     orchestrator.conn_manager.get_client.side_effect = lambda name: ssh
     with patch.object(orchestration, "wait_for_job_running", return_value=False):
-        with pytest.raises(RemoteLLMError, match="(?s)ended before it started running.*Invalid account"):
+        with pytest.raises(SlurmLLMError, match="(?s)ended before it started running.*Invalid account"):
             orchestrator.ensure_model_ready("qwen-3-8b")
 
 

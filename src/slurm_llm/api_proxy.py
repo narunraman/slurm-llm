@@ -450,10 +450,10 @@ async def run_proxy_server(port: int = 8000):
         try:
             runner = await proxy.start_server()
         except OSError as e:
-            from .config import RemoteLLMError
+            from .config import SlurmLLMError
 
             proxy.cleanup()
-            raise RemoteLLMError(f"Could not listen on localhost:{port}: {e.strerror or e}. Try --port.") from None
+            raise SlurmLLMError(f"Could not listen on localhost:{port}: {e.strerror or e}. Try --port.") from None
         try:
             await proxy.stopped.wait()
         finally:

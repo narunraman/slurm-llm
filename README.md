@@ -157,9 +157,9 @@ To add a model, add an entry to `model_registry.yaml` (the `id` is the Hugging F
 ## Using it from Python
 
 ```python
-from slurm_llm import RemoteLLM
+from slurm_llm import SlurmLLM
 
-with RemoteLLM("qwen-3-8b") as llm:     # submits or reuses a job, waits, opens a tunnel
+with SlurmLLM("qwen-3-8b") as llm:     # submits or reuses a job, waits, opens a tunnel
     llm.ensure_ready()
     reply = llm.generate(messages=[{"role": "user", "content": "Hello!"}])
     print(reply.choices[0].message.content)
@@ -169,7 +169,7 @@ with RemoteLLM("qwen-3-8b") as llm:     # submits or reuses a job, waits, opens 
 
 ```python
 questions = ["What is 2+2?", "Name a prime number."]
-with RemoteLLM("qwen-3-8b") as llm:
+with SlurmLLM("qwen-3-8b") as llm:
     llm.ensure_ready()
     replies = llm.generate_batch(
         [{"messages": [{"role": "user", "content": q}]} for q in questions],
@@ -179,7 +179,7 @@ for question, reply in zip(questions, replies):
     print(question, "->", reply if isinstance(reply, Exception) else reply.choices[0].message.content)
 ```
 
-For jobs that run on the cluster itself, `submit_model` starts servers without waiting and returns their job ids (for Slurm dependencies), and `RemoteLLM(model, local=True, nodes_dir=...)` connects to them directly from a compute node, balancing requests over several instances:
+For jobs that run on the cluster itself, `submit_model` starts servers without waiting and returns their job ids (for Slurm dependencies), and `SlurmLLM(model, local=True, nodes_dir=...)` connects to them directly from a compute node, balancing requests over several instances:
 
 ```python
 from slurm_llm import submit_model
@@ -194,7 +194,7 @@ print(result.job_ids, result.after_any_dependency, result.nodes_dir)
 - **"Could not check job ... for 2 minutes"**: Slurm on that cluster did not answer (it is sometimes busy). The job keeps running; `sllm prepare` picks it up again when you rerun it. To wait longer, set `SLURM_LLM_BUSY_TIMEOUT` (seconds).
 - **Job fails immediately**: `sllm prepare` shows the end of the job's log. Common causes are a missing `account`, a wrong GPU type name (`slurm_spec`), or `setup_commands` that load a different Python than `setup` used.
 - **CUDA out of memory / KV cache errors**: set `max_model_len` for the model, or `model_memory_gb` to request more GPU memory (`sllm config model NAME`); `prepare` offers this when it happens.
-- **The proxy cannot reach a model**: the port forward goes from the login node to the compute node; some sites block this, in which case run your client on the cluster and use `RemoteLLM(local=True)`.
+- **The proxy cannot reach a model**: the port forward goes from the login node to the compute node; some sites block this, in which case run your client on the cluster and use `SlurmLLM(local=True)`.
 
 ## Development
 

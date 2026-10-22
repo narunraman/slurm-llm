@@ -3,9 +3,9 @@
 Run after `sllm init`, `connect`, `setup` and `download qwen-3-8b` (see the README).
 """
 
-from slurm_llm import RemoteLLM
+from slurm_llm import SlurmLLM
 
-with RemoteLLM("qwen-3-8b", walltime="1:00:00") as llm:
+with SlurmLLM("qwen-3-8b", walltime="1:00:00") as llm:
     llm.ensure_ready()  # reuses a running job, or submits one and waits until vLLM is loaded
 
     reply = llm.generate(messages=[{"role": "user", "content": "What is the capital of France?"}], max_tokens=50)

@@ -183,3 +183,18 @@ def test_gpu_types_under_resources_in_rclusts_config(isolated_home, loader):
         ("a100", "a100", 80), ("a100_3g", "a100_3g.40gb", 40),
     ]
     assert [g.type for g in clusters["cluster-b"].gpu_types] == ["h200", "l40s"]  # the top level wins
+
+
+@pytest.mark.parametrize("module", ["slurm_llm", "slurm_llm.client", "slurm_llm.config"])
+def test_old_names_still_work_with_a_warning(module):
+    import importlib
+
+    import slurm_llm
+
+    mod = importlib.import_module(module)
+    old, new = ("RemoteLLMError", slurm_llm.SlurmLLMError) if module.endswith("config") else ("RemoteLLM", slurm_llm.SlurmLLM)
+    with pytest.warns(DeprecationWarning, match=f"{old} is now called"):
+        assert getattr(mod, old) is new
+    if module == "slurm_llm":
+        with pytest.warns(DeprecationWarning):
+            assert slurm_llm.RemoteLLMError is slurm_llm.SlurmLLMError

@@ -16,7 +16,7 @@ from pathlib import Path
 import yaml
 from rich.console import Console
 
-from .config import ConfigLoader, RemoteLLMError
+from .config import ConfigLoader, SlurmLLMError
 from .job import JobManager, JobInfo
 from .ssh import NotConnectedError, SlurmUnavailableError, StatusUnknownError
 from .ssh_manager import SSHConnectionManager
@@ -396,7 +396,7 @@ class JobOrchestrator:
             )
 
             if not success:
-                raise RemoteLLMError(
+                raise SlurmLLMError(
                     f"Job {job.job_id} ended before it started running (status: {job.status}). "
                     f"{_check_job_errors(ssh_client, job.job_id, job)}"
                 )
@@ -441,12 +441,12 @@ class JobOrchestrator:
             if "KV cache memory error" in error_str:
                 console.print("  [red]✗ KV cache memory error detected[/red]")
                 if self._handle_kv_cache_error(model_name, error_str):
-                    raise RemoteLLMError("max_model_len updated in model_registry.yaml; run the command again") from None
+                    raise SlurmLLMError("max_model_len updated in model_registry.yaml; run the command again") from None
             elif "Out of Memory" in error_str or "out of GPU memory" in error_str:
                 console.print("  [red]✗ CUDA Out of Memory error detected[/red]")
                 cluster_config = self.config_loader.load_clusters().get(job.cluster_name)
                 if cluster_config and self._handle_oom_error(model_name, job, cluster_config, error_str):
-                    raise RemoteLLMError("model_memory_gb updated in model_registry.yaml; run the command again") from None
+                    raise SlurmLLMError("model_memory_gb updated in model_registry.yaml; run the command again") from None
             raise
 
         except TimeoutError as e:

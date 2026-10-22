@@ -8,15 +8,15 @@ from unittest.mock import Mock, patch
 import pytest
 
 from slurm_llm.client import (
-    RemoteLLM,
+    SlurmLLM,
     TunnelHandle,
     TunnelRegistry,
     _model_ids_match,
 )
 
 
-def _client(local_port: int = 43123) -> RemoteLLM:
-    client = RemoteLLM.__new__(RemoteLLM)
+def _client(local_port: int = 43123) -> SlurmLLM:
+    client = SlurmLLM.__new__(SlurmLLM)
     client.local_port = local_port
     client.model = "test-model"
     client._job = SimpleNamespace(
@@ -162,7 +162,7 @@ def test_model_id_match_tolerates_alias_punctuation_and_case():
 
 @pytest.mark.unit
 def test_remote_handshake_rejects_an_unexpected_served_model():
-    client = RemoteLLM.__new__(RemoteLLM)
+    client = SlurmLLM.__new__(SlurmLLM)
     client.model = "qwen-3-14b"
     client.served_model_name = "Qwen3-14B"
     client.cluster = "cluster-b"

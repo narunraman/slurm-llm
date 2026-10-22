@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `RemoteLLM` is now `SlurmLLM`, and `RemoteLLMError` is now `SlurmLLMError`: the client also runs
+  on the cluster itself (`local=True`), so "remote" no longer described it. The old names still
+  work, with a `DeprecationWarning`, and will be removed in a future release.
+
 ### Fixed
 - Every command on a cluster now runs in a login shell, as `sbatch` already did. On clusters where
   only the login profile puts Slurm on the PATH and sets `SLURM_CONF` and `$SCRATCH` (e.g. Alliance

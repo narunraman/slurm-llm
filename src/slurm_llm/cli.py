@@ -42,9 +42,9 @@ class CLIGroup(click.RichGroup):
         except click.exceptions.ClickException:
             raise
         except Exception as e:
-            from .config import RemoteLLMError, env
+            from .config import SlurmLLMError, env
 
-            if isinstance(e, RemoteLLMError) or env("DEBUG") is None and _is_expected(e):
+            if isinstance(e, SlurmLLMError) or env("DEBUG") is None and _is_expected(e):
                 err_console.print(f"[red]Error:[/red] {e}", highlight=False)
                 sys.exit(1)
             raise
@@ -57,9 +57,9 @@ def _is_expected(e: Exception) -> bool:
 
 def fail(message: str):
     """Stop with an error message (exit code 1)."""
-    from .config import RemoteLLMError
+    from .config import SlurmLLMError
 
-    raise RemoteLLMError(message)
+    raise SlurmLLMError(message)
 
 
 @click.group(cls=CLIGroup)
@@ -530,9 +530,9 @@ def submit(models: tuple, force_cluster: str | None, time: str | None, gpus: str
             console.print(f"[green]✓[/green] {label}: job {job_id} on {cluster} ({gpu}, est. wait {est})")
             submitted.append(job_id)
         except Exception as e:
-            from .config import RemoteLLMError
+            from .config import SlurmLLMError
 
-            if not isinstance(e, (RemoteLLMError, OSError)):
+            if not isinstance(e, (SlurmLLMError, OSError)):
                 raise
             err_console.print(f"[red]✗[/red] {label}: {e}", highlight=False)
             failed.append(label)
