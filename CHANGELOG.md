@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `UNKNOWN` (or, in `sllm jobs`, the last known state) and a warning shows the error, once per
   error rather than on every poll. `sllm prepare` keeps waiting and never records a job as
   `UNKNOWN`, so an interrupted wait cannot hide the job from later runs (#3).
+- Failed checks are told apart instead of all being retried forever (#3):
+  - a lost SSH connection stops with what to do; in a terminal, `sllm prepare` logs in again
+    (answering two-factor prompts) and resumes waiting for the same job;
+  - Slurm missing or unconfigured on the login node stops with an error naming the problem;
+  - a busy Slurm controller or accounting database is retried, for up to 10 minutes in a row.
+  None of these makes `sllm prepare` replace a job it could not check.
+- When `sbatch`'s answer is lost (a timeout or dropped connection), the queue is checked for the
+  job before reporting a failure, so retrying does not start a second job.
+- `sllm connect` checks that Slurm's commands work on each cluster.
 
 ## [0.6.2] - 2026-10-01
 

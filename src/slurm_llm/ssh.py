@@ -9,10 +9,12 @@ so a connection opened by either tool is reused by the other.
 from __future__ import annotations
 
 import logging
+import re
 import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from .config import ClusterConfig, ConfigError, RemoteLLMError
@@ -22,10 +24,30 @@ logger = logging.getLogger(__name__)
 DEFAULT_PERSIST = "1h"  # how long an idle master connection stays open (ssh ControlPersist)
 # Printed before a command in a login shell; anything a site profile prints before it is dropped
 OUTPUT_MARKER = "SLURM_LLM_OUTPUT_START"
+SLURM_HINT = "slurm-llm runs Slurm's commands in a login shell; check that `bash -lc squeue` works on {name}."
+
+
+# Slurm's own messages when it is missing or not configured (failures that retrying cannot fix)
+SLURM_MISSING = ("command not found", "configuration source")
+SLURM_COMMANDS = ("sbatch", "squeue", "sacct", "scancel")
+# ...and when the controller is busy or unreachable (sbatch may or may not have submitted the job)
+SLURM_BUSY = ("timed out", "unable to contact", "connection", "temporarily unavailable", "try again")
 
 
 class NotConnectedError(RemoteLLMError):
     """No usable SSH connection to a cluster."""
+
+    def __init__(self, message: str, cluster: str | None = None):
+        super().__init__(message)
+        self.cluster = cluster
+
+
+class SlurmUnavailableError(RemoteLLMError):
+    """Slurm's commands are missing or not configured on a cluster's login node."""
+
+
+class StatusUnknownError(RemoteLLMError):
+    """A job's status could not be checked for too long (the job itself may be fine)."""
 
 
 def shell_path(path: str) -> str:
@@ -49,6 +71,7 @@ class SSHClient:
         self.destination = transport.destination
         self.ssh_master_socket = str(transport.socket_path)
         self._status_warning: str | None = None  # last "could not check" warning, so polls don't repeat it
+        self.last_status_error: str | None = None  # why the last status check gave UNKNOWN
 
     def _get_ssh_target(self) -> str:
         """The ssh destination ([user@]host or an alias from ~/.ssh/config)."""
@@ -111,7 +134,7 @@ class SSHClient:
                 if interactive
                 else f"Run `sllm connect {name}` to log in (it can answer password or two-factor prompts)."
             )
-            raise NotConnectedError(f"Could not connect to {name} ({self.destination}): {detail}. {hint}")
+            raise NotConnectedError(f"Could not connect to {name} ({self.destination}): {detail}. {hint}", name)
 
     def execute_command(
         self,
@@ -166,16 +189,88 @@ class SSHClient:
             raise RemoteLLMError(f"Could not create {path} on {self.config.name}: {err.strip() or f'exit code {code}'}")
         return lines[-1]
 
-    def submit_slurm_job(self, script_content: str, remote_script_path: str) -> str:
-        """Upload a batch script and submit it with sbatch. Returns the Slurm job id."""
-        code, _, err = self.execute_command(f"cat > {shell_path(remote_script_path)}", input=script_content)
+    def lost_connection(self, doing: str) -> NotConnectedError:
+        """The error for a command that failed because the connection is gone."""
+        name = self.config.name
+        return NotConnectedError(
+            f"Lost the connection to {name} while {doing}. Run `sllm connect {name}`, then run the command again.",
+            name,
+        )
+
+    def check_connection(self, code: int, doing: str) -> None:
+        """Raise NotConnectedError if a command failed (`code`) because the connection is gone."""
+        if self._connection_lost(code):
+            raise self.lost_connection(doing)
+
+    def _connection_lost(self, code: int) -> bool:
+        return code == 255 and not self.has_active_connection()
+
+    def slurm_problem(self) -> str | None:
+        """Why Slurm's commands cannot be used on the login node, or None if they can."""
+        commands = " ".join(SLURM_COMMANDS)
+        code, out, err = self.execute_command(f"for c in {commands}; do command -v $c >/dev/null || echo $c; done")
+        if self._connection_lost(code):
+            raise self.lost_connection("checking Slurm")
         if code != 0:
-            raise RemoteLLMError(f"Could not upload the job script to {self.config.name}: {err.strip()}")
-        code, out, err = self.execute_command(f"sbatch {shell_path(remote_script_path)}")
+            return f"could not check ({err.strip() or f'exit code {code}'})"
+        missing = out.split()
+        if missing:
+            return f"{', '.join(missing)} not found, even in a login shell"
+        return None
+
+    def _job_ids_named(self, job_name: str) -> set[str] | None:
+        """Your queued jobs with this name, or None if the queue could not be read."""
+        code, out, _ = self.execute_command(f"squeue -u $USER -h -n {shlex.quote(job_name)} -o %i")
+        return set(out.split()) if code == 0 else None
+
+    def submit_slurm_job(self, script_content: str, remote_script_path: str) -> str:
+        """Upload a batch script and submit it with sbatch. Returns the Slurm job id.
+
+        When sbatch's answer is lost (a timeout or dropped connection), the job may still have
+        been submitted, so the queue is checked before reporting a failure: retrying blindly
+        would start a second job.
+        """
+        name = self.config.name
+        code, _, err = self.execute_command(f"cat > {shell_path(remote_script_path)}", input=script_content)
+        if self._connection_lost(code):
+            raise self.lost_connection("uploading the job script (no job was submitted)")
+        if code != 0:
+            raise RemoteLLMError(f"Could not upload the job script to {name}: {err.strip()}")
+        job_name = re.search(r"^#SBATCH\s+(?:--job-name[= ]|-J\s*)(\S+)", script_content, re.MULTILINE)
+        before = self._job_ids_named(job_name.group(1)) if job_name else None
+
+        code, out, err = self.execute_command(f"sbatch {shell_path(remote_script_path)}", timeout=60)
         for line in out.splitlines():
             if "Submitted batch job" in line:
                 return line.split()[-1]
-        raise RemoteLLMError(f"sbatch failed on {self.config.name}: {err.strip() or out.strip() or f'exit code {code}'}")
+        reason = err.strip() or out.strip() or f"exit code {code}"
+        if any(s in reason.lower() for s in SLURM_MISSING):
+            raise SlurmUnavailableError(f"sbatch failed on {name}: {reason}. {SLURM_HINT.format(name=name)}")
+        if code not in (0, -1, 255) and not any(s in reason.lower() for s in SLURM_BUSY):
+            raise RemoteLLMError(f"sbatch failed on {name}: {reason}")  # Slurm refused the job
+
+        # The answer was lost: look for the job in the queue
+        if self._connection_lost(code):
+            raise NotConnectedError(
+                f"Lost the connection to {name} while submitting; the job may have been submitted. "
+                f"Run `sllm connect {name}`, then run the command again: it will find the job if it was.",
+                name,
+            )
+        if before is not None:
+            for _ in range(3):
+                time.sleep(5)
+                after = self._job_ids_named(job_name.group(1))
+                if after is None:
+                    break
+                new = after - before
+                if len(new) == 1:
+                    job_id = new.pop()
+                    logger.warning(f"sbatch on {name} did not answer ({reason}), but job {job_id} is in the queue; using it")
+                    return job_id
+        raise RemoteLLMError(
+            f"sbatch on {name} did not answer ({reason}) and the job is not in the queue. "
+            f"Check `squeue -u $USER` on {name} before running the command again, to avoid a second job."
+        )
 
     def get_job_status(self, job_id: str) -> tuple[str, str | None, str | None]:
         """(state, node, time left) of a Slurm job.
@@ -186,8 +281,9 @@ class SSHClient:
         """
         job = shlex.quote(str(job_id))
         code, out, err = self.execute_command(f"squeue -j {job} -h -o '%T|%N|%L'")
+        self._check_status_failure(job_id, "squeue", code, err)
         if code == 0:
-            self._status_warning = None
+            self._status_warning = self.last_status_error = None
         if code == 0 and out.strip():
             parts = out.strip().splitlines()[0].split("|")
             node = parts[1] if len(parts) > 1 and parts[1] else None
@@ -197,14 +293,27 @@ class SSHClient:
         if code != 0 and "invalid job id" not in err.lower():
             return self._unknown_status(f"squeue failed: {err.strip() or f'exit code {code}'}")
         code, out, err = self.execute_command(f"sacct -j {job} -X -n -P -o State")
+        self._check_status_failure(job_id, "sacct", code, err)
         if code == 0 and out.strip():
             return out.split()[0], None, None
         if code != 0:
             return self._unknown_status(f"sacct failed: {err.strip() or f'exit code {code}'}")
         return "NOT_FOUND", None, None
 
+    def _check_status_failure(self, job_id: str, command: str, code: int, err: str) -> None:
+        """Raise for failures that retrying cannot fix: a lost connection, or Slurm missing."""
+        if self._connection_lost(code):
+            raise self.lost_connection(f"checking job {job_id} (the job has not been cancelled)")
+        if code != 0 and any(s in err.lower() for s in SLURM_MISSING):
+            name = self.config.name
+            raise SlurmUnavailableError(
+                f"Could not check job {job_id} on {name}: {err.strip()}. The job has not been cancelled. "
+                + SLURM_HINT.format(name=name)
+            )
+
     def _unknown_status(self, reason: str) -> tuple[str, None, None]:
         """UNKNOWN, warning once per distinct reason (callers poll, and the reason rarely changes)."""
+        self.last_status_error = reason
         message = f"Could not check job status on {self.config.name} ({reason}); will keep trying"
         if message != getattr(self, "_status_warning", None):
             logger.warning(message)

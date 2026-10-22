@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from slurm_llm.ssh import NotConnectedError, SSHClient, shell_path
+from slurm_llm.config import RemoteLLMError
+from slurm_llm.ssh import NotConnectedError, SlurmUnavailableError, SSHClient, shell_path
 
 
 @pytest.fixture
@@ -93,28 +94,48 @@ def test_job_status(client, monkeypatch, completed):
     _record(monkeypatch, completed, [(0, "", ""), (0, "", "")])
     assert client.get_job_status("7")[0] == "NOT_FOUND"
 
-    # the cluster could not be asked at all
+
+
+def test_failed_status_checks_are_never_read_as_finished_jobs(client, monkeypatch, completed):
+    # a busy controller or accounting database: UNKNOWN, so callers try again
+    _record(monkeypatch, completed, [(1, "", "squeue: error: Socket timed out on send/recv operation")])
+    assert client.get_job_status("7")[0] == "UNKNOWN"
+    assert "Socket timed out" in client.last_status_error
+    _record(monkeypatch, completed, [(0, "", ""), (1, "", "sacct: error: Problem talking to the database")])
+    assert client.get_job_status("7")[0] == "UNKNOWN"
+    # a network blip while the master connection stays up: also worth retrying
+    monkeypatch.setattr(SSHClient, "has_active_connection", lambda self: True)
     _record(monkeypatch, completed, [(255, "", "Connection reset")])
     assert client.get_job_status("7")[0] == "UNKNOWN"
 
-    # a failed check is not a finished job (e.g. Slurm not on the PATH, or no SLURM_CONF)
-    _record(monkeypatch, completed, [(127, "", "bash: squeue: command not found")])
-    assert client.get_job_status("7")[0] == "UNKNOWN"
-    _record(monkeypatch, completed, [(1, "", "squeue: fatal: Could not establish a configuration source")])
-    assert client.get_job_status("7")[0] == "UNKNOWN"
-    _record(monkeypatch, completed, [(0, "", ""), (1, "", "sacct: error: Problem talking to the database")])
-    assert client.get_job_status("7")[0] == "UNKNOWN"
+
+@pytest.mark.parametrize("error", [
+    "bash: squeue: command not found",
+    "squeue: fatal: Could not establish a configuration source",
+])
+def test_missing_slurm_is_an_error_not_a_retry(client, monkeypatch, completed, error):
+    monkeypatch.setattr(SSHClient, "has_active_connection", lambda self: True)
+    _record(monkeypatch, completed, [(127 if "not found" in error else 1, "", error)])
+    with pytest.raises(SlurmUnavailableError, match="(?s)Could not check job 7 on cluster-a.*not been cancelled.*bash -lc squeue"):
+        client.get_job_status("7")
+
+
+def test_lost_connection_is_an_error_not_a_retry(client, monkeypatch, completed):
+    _record(monkeypatch, completed, [(255, "", "Control socket connect: No such file")])  # no master left
+    with pytest.raises(NotConnectedError, match="Lost the connection to cluster-a.*sllm connect cluster-a") as e:
+        client.get_job_status("7")
+    assert e.value.cluster == "cluster-a"
 
 
 def test_failed_status_checks_warn_once_per_reason(client, monkeypatch, completed, caplog):
-    missing = (127, "", "bash: squeue: command not found")
-    _record(monkeypatch, completed, [missing, missing, (0, "RUNNING|gpu3|1:00:00\n", ""), missing])
+    busy = (1, "", "squeue: error: Socket timed out on send/recv operation")
+    _record(monkeypatch, completed, [busy, busy, (0, "RUNNING|gpu3|1:00:00\n", ""), busy])
     for _ in range(4):
         client.get_job_status("7")
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     # repeated polls stay quiet; after a successful check, a new failure is reported again
     assert warnings == [
-        "Could not check job status on cluster-a (squeue failed: bash: squeue: command not found); will keep trying"
+        "Could not check job status on cluster-a (squeue failed: squeue: error: Socket timed out on send/recv operation); will keep trying"
     ] * 2
 
 
@@ -130,3 +151,53 @@ def test_streaming_hides_the_shared_connection_closed_message(client, monkeypatc
     assert client.execute_command_streaming("bash -l") == 0
     cmd = calls[0][0]
     assert "-tt" in cmd and "LogLevel=ERROR" in cmd and "BatchMode=yes" in cmd
+
+
+SCRIPT = "#!/bin/bash\n#SBATCH --job-name=vllm-qwen\nvllm serve\n"
+
+
+@pytest.fixture
+def connected(monkeypatch):
+    monkeypatch.setattr(SSHClient, "has_active_connection", lambda self: True)
+    monkeypatch.setattr("slurm_llm.ssh.time.sleep", lambda s: None)
+
+
+def test_sbatch_refusal_is_reported_without_looking_further(client, monkeypatch, completed, connected):
+    err = "sbatch: error: Batch job submission failed: Invalid account or account/partition combination specified"
+    calls = _record(monkeypatch, completed, [(0, "", ""), (0, "", ""), (1, "", err)])
+    with pytest.raises(RemoteLLMError, match="Invalid account"):
+        client.submit_slurm_job(SCRIPT, "~/x.slurm")
+    assert len(calls) == 3  # upload, queue before, sbatch
+
+
+def test_sbatch_without_an_answer_finds_the_job_it_submitted(client, monkeypatch, completed, connected, caplog):
+    timeout = "sbatch: error: Batch job submission failed: Socket timed out on send/recv operation"
+    _record(monkeypatch, completed, [(0, "", ""), (0, "100\n", ""), (1, "", timeout), (0, "100\n101\n", "")])
+    assert client.submit_slurm_job(SCRIPT, "~/x.slurm") == "101"  # 100 was already queued
+    assert "job 101 is in the queue; using it" in caplog.text
+
+
+def test_sbatch_without_an_answer_and_no_new_job(client, monkeypatch, completed, connected):
+    _record(monkeypatch, completed, [(0, "", ""), (0, "", ""), (1, "", "Socket timed out")] + [(0, "", "")] * 3)
+    with pytest.raises(RemoteLLMError, match="not in the queue. Check `squeue -u \\$USER`"):
+        client.submit_slurm_job(SCRIPT, "~/x.slurm")
+
+
+def test_sbatch_connection_lost_may_have_submitted(client, monkeypatch, completed):
+    monkeypatch.setattr(SSHClient, "has_active_connection", lambda self: False)  # only asked after a 255
+    _record(monkeypatch, completed, [(0, "", ""), (0, "", ""), (255, "", "Broken pipe")])
+    with pytest.raises(NotConnectedError, match="may have been submitted.*will find the job"):
+        client.submit_slurm_job(SCRIPT, "~/x.slurm")
+
+
+def test_sbatch_missing_is_a_slurm_error(client, monkeypatch, completed, connected):
+    _record(monkeypatch, completed, [(0, "", ""), (127, "", "bash: squeue: command not found"),
+                                     (127, "", "bash: sbatch: command not found")])
+    with pytest.raises(SlurmUnavailableError, match="sbatch: command not found.*login shell"):
+        client.submit_slurm_job(SCRIPT, "~/x.slurm")
+
+
+def test_slurm_problem_names_missing_commands(client, monkeypatch, completed, connected):
+    _record(monkeypatch, completed, [(0, "", ""), (0, "sacct\nscancel\n", "")])
+    assert client.slurm_problem() is None
+    assert client.slurm_problem() == "sacct, scancel not found, even in a login shell"

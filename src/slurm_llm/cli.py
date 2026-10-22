@@ -267,17 +267,25 @@ def connect(clusters: tuple, persist: str | None, status: bool):
         console.print(table)
         return
 
+    from .ssh import SLURM_HINT
+
     failed = []
     for name, cfg in targets.items():
         client = SSHClient(cfg)
-        if client.has_active_connection():
-            console.print(f"[green]✓[/green] {name}: already connected")
-            continue
         try:
-            client.connect(interactive=True, persist=persist)
-            console.print(f"[green]✓[/green] {name}: connected")
+            if client.has_active_connection():
+                console.print(f"[green]✓[/green] {name}: already connected")
+            else:
+                client.connect(interactive=True, persist=persist)
+                console.print(f"[green]✓[/green] {name}: connected")
+            # checked now, so a broken setup shows up before a job has waited in the queue
+            problem = client.slurm_problem()
         except Exception as e:
             err_console.print(f"[red]✗[/red] {name}: {e}", highlight=False)
+            failed.append(name)
+            continue
+        if problem:
+            err_console.print(f"[red]✗[/red] {name}: Slurm: {problem}. {SLURM_HINT.format(name=name)}", highlight=False)
             failed.append(name)
     if failed:
         sys.exit(1)

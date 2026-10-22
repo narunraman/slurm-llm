@@ -107,6 +107,24 @@ class FakeSSH:
                 return result
         return 0, "", ""
 
+    last_status_error = None
+
+    def has_active_connection(self):
+        return True
+
+    def check_connection(self, code, doing):
+        from slurm_llm.ssh import SSHClient
+
+        SSHClient.check_connection(self, code, doing)
+
+    def _connection_lost(self, code):
+        return code == 255 and not self.has_active_connection()
+
+    def lost_connection(self, doing):
+        from slurm_llm.ssh import SSHClient
+
+        return SSHClient.lost_connection(self, doing)
+
     def get_remote_slurm_log_path(self, job_id):
         return f"{self.config.remote_root}/slurm-{job_id}.out"
 

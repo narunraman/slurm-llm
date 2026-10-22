@@ -41,6 +41,16 @@ class SSHConnectionManager:
             self._connections[cluster_name] = client
             return client
 
+    def reconnect(self, cluster_name: str) -> SSHClient:
+        """Open a new master connection interactively (answering two-factor prompts)."""
+        with self._lock:
+            cluster_lock = self._cluster_locks.setdefault(cluster_name, threading.Lock())
+        with cluster_lock:
+            client = self._connections.get(cluster_name) or SSHClient(self.config_loader.get_cluster(cluster_name))
+            client.connect(interactive=True)
+            self._connections[cluster_name] = client
+            return client
+
     def close_all(self) -> None:
         """Forget cached clients. Master connections stay open until their ControlPersist expires."""
         self._connections.clear()
