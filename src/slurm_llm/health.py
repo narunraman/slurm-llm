@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from rich.console import Console
 
 from .job import JobInfo
-from .ssh import SSHClient, shell_path
+from .ssh import SSHClient, StatusUnknownError, shell_path
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -20,7 +20,31 @@ console = Console()
 WAITING_STATES = {"SUBMITTED", "PENDING", "CONFIGURING", "REQUEUED", "RESIZING", "SUSPENDED", "UNKNOWN"}
 
 OOM_PATTERN = re.compile(r"OutOfMemoryError|CUDA out of memory|out of memory|\bOOM\b", re.IGNORECASE)
+# How long a job's status may stay unknown (e.g. a busy Slurm controller) before giving up
+STATUS_RETRY_LIMIT = 600
+
 KV_CACHE_PATTERN = re.compile(r"KV cache|max seq len|max_model_len|maximum model length", re.IGNORECASE)
+
+
+class _StatusTimer:
+    """Gives up once a job's status has been UNKNOWN for STATUS_RETRY_LIMIT seconds in a row."""
+
+    def __init__(self, job: JobInfo, ssh_client: SSHClient):
+        self.job, self.ssh_client, self.since = job, ssh_client, None
+
+    def update(self, status: str) -> None:
+        if status != "UNKNOWN":
+            self.since = None
+            return
+        now = time.time()
+        self.since = self.since or now
+        if now - self.since >= STATUS_RETRY_LIMIT:
+            reason = getattr(self.ssh_client, "last_status_error", None) or "no answer"
+            raise StatusUnknownError(
+                f"Could not check job {self.job.job_id} on {self.ssh_client.config.name} for "
+                f"{STATUS_RETRY_LIMIT // 60} minutes ({reason}). The job has not been cancelled; "
+                f"check it later with `sllm jobs`."
+            )
 
 
 @contextmanager
@@ -108,6 +132,7 @@ def detect_vllm_port(
         while True:
             for grep, pattern in PORT_PATTERNS:
                 code, output, _ = ssh_client.execute_command(f"{grep} {log_path} 2>/dev/null | tail -1", timeout=10)
+                ssh_client.check_connection(code, f"reading the log of job {job.job_id} (the job has not been cancelled)")
                 match = re.search(pattern, output) if code == 0 else None
                 if match:
                     return int(match.group(1))
@@ -140,11 +165,13 @@ def wait_for_vllm_health(
     log_path = shell_path(ssh_client.get_remote_slurm_log_path(job.job_id))
     start = last_check = time.time()
     interval = initial_interval
+    timer = _StatusTimer(job, ssh_client)
     with _spinner(show_progress, f"Loading vLLM (job {job.job_id})..."):
         while True:
             if time.time() - last_check >= 30:
                 last_check = time.time()
                 status, _, _ = ssh_client.get_job_status(job.job_id)
+                timer.update(status)
                 if status not in {"RUNNING", "COMPLETING", "UNKNOWN"}:
                     raise RuntimeError(
                         f"Job {job.job_id} ended (status: {status}). {_check_job_errors(ssh_client, job.job_id, job)}"
@@ -159,6 +186,7 @@ def wait_for_vllm_health(
                     )
 
             code, _, _ = ssh_client.execute_command(f"curl -sf -m 5 {health_url} >/dev/null", timeout=15)
+            ssh_client.check_connection(code, f"waiting for vLLM to start (job {job.job_id} has not been cancelled)")
             if code == 0:
                 if show_progress:
                     console.print(f"    ✓ vLLM server is healthy (loaded in {int(time.time() - start)}s)")
@@ -180,9 +208,11 @@ def wait_for_job_running(
     `estimated_wait` is informational only; this waits as long as the job is queued (Ctrl+C to stop).
     """
     previous = job.status
+    timer = _StatusTimer(job, ssh_client)
     with _spinner(show_progress, f"Waiting for Slurm (job {job.job_id})..."):
         while True:
             status, node, _ = ssh_client.get_job_status(job.job_id)
+            timer.update(status)
             if status == "UNKNOWN":  # the check failed; keep the last known state (UNKNOWN is not cached)
                 time.sleep(poll_interval)
                 continue

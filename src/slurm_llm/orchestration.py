@@ -18,6 +18,7 @@ from rich.console import Console
 
 from .config import ConfigLoader, RemoteLLMError
 from .job import JobManager, JobInfo
+from .ssh import NotConnectedError, SlurmUnavailableError, StatusUnknownError
 from .ssh_manager import SSHConnectionManager
 from .scheduler import ClusterScheduler
 from .health import (
@@ -29,6 +30,10 @@ from .health import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Failures to check on a job, which say nothing about the job itself
+CHECK_FAILURES = (NotConnectedError, SlurmUnavailableError, StatusUnknownError)
+MAX_RECONNECTS = 2  # times `prepare` logs in again (in a terminal) after losing a connection
 console = Console()
 
 
@@ -179,14 +184,23 @@ class JobOrchestrator:
             # The full discovery check deliberately happens after lock acquisition.
             # A process that waited will therefore see and reuse the first process's
             # PENDING or RUNNING job instead of submitting a duplicate.
-            return self._ensure_model_ready_unlocked(
-                model_name,
-                cluster_name=cluster_name,
-                cluster_map=cluster_map,
-                time_override=time_override,
-                exclude_clusters=exclude_clusters,
-                instance=instance,
-            )
+            for attempt in range(MAX_RECONNECTS + 1):
+                try:
+                    return self._ensure_model_ready_unlocked(
+                        model_name,
+                        cluster_name=cluster_name,
+                        cluster_map=cluster_map,
+                        time_override=time_override,
+                        exclude_clusters=exclude_clusters,
+                        instance=instance,
+                    )
+                except NotConnectedError as e:
+                    # In a terminal, log in again and start over: step 1 finds the job (in the
+                    # cache, or in the queue if it was submitted just as the connection dropped)
+                    if not (e.cluster and sys.stdin.isatty()) or attempt == MAX_RECONNECTS:
+                        raise
+                    console.print(f"  [yellow]⚠ Lost the connection to {e.cluster}; logging in again...[/yellow]")
+                    self.conn_manager.reconnect(e.cluster)
 
     def _ensure_model_ready_unlocked(
         self,
@@ -289,6 +303,8 @@ class JobOrchestrator:
                     )
                     if not success:
                         raise Exception(f"Job {existing_job.job_id} failed to reach RUNNING status")
+                except CHECK_FAILURES:
+                    raise  # the job may be fine: never replace it because it could not be checked
                 except Exception as e:
                     console.print(f"  [yellow]⚠ Existing job failed: {e}[/yellow]")
                     console.print("  [yellow]→ Will submit new job[/yellow]")
@@ -329,6 +345,8 @@ class JobOrchestrator:
                             )
 
                     return existing_job
+                except CHECK_FAILURES:
+                    raise
                 except Exception as e:
                     console.print(f"  [yellow]⚠ Existing job not healthy: {e}[/yellow]")
                     console.print("  [yellow]→ Will submit new job[/yellow]")

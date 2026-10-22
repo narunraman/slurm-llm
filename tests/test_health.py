@@ -7,6 +7,7 @@ import pytest
 from slurm_llm import health
 from slurm_llm.health import _check_job_errors, detect_vllm_port, wait_for_job_running, wait_for_vllm_health
 from slurm_llm.job import JobInfo
+from slurm_llm.ssh import NotConnectedError
 
 
 @pytest.fixture(autouse=True)
@@ -91,3 +92,27 @@ def test_log_diagnosis(fake_ssh):
     msg = _check_job_errors(fake_ssh(responses=[("tail", (0, "Traceback\nImportError: no vllm\n", ""))]), "77")
     assert msg.startswith("Error in the job's logs")
     assert "Could not read" in _check_job_errors(fake_ssh(), "77")
+
+
+def test_wait_gives_up_after_the_status_stays_unknown(fake_ssh, monkeypatch):
+    clock = iter(range(0, 100_000, 60))
+    monkeypatch.setattr(health.time, "time", lambda: next(clock))
+    ssh = fake_ssh()
+    ssh.last_status_error = "squeue failed: Socket timed out"
+    ssh.get_job_status = Mock(return_value=("UNKNOWN", None, None))
+    with pytest.raises(health.StatusUnknownError, match="(?s)job 77 on cluster-a for 10 minutes.*Socket timed out.*not been cancelled"):
+        wait_for_job_running(_job(), ssh, Mock(), show_progress=False)
+
+
+def test_unknown_streak_resets_when_a_check_works(fake_ssh, monkeypatch):
+    clock = iter(range(0, 100_000, 300))  # each check 5 minutes apart
+    monkeypatch.setattr(health.time, "time", lambda: next(clock))
+    statuses = [("UNKNOWN", None), ("PENDING", None)] * 5 + [("RUNNING", "g1")]
+    assert wait_for_job_running(_job(), _status_ssh(fake_ssh, statuses), Mock(), show_progress=False)
+
+
+def test_health_wait_stops_when_the_connection_is_lost(fake_ssh, monkeypatch):
+    ssh = fake_ssh(responses=[("curl", (255, "", "Control socket connect: No such file"))])
+    ssh.has_active_connection = lambda: False
+    with pytest.raises(NotConnectedError, match="Lost the connection to cluster-a while waiting for vLLM"):
+        wait_for_vllm_health(_job(node="g1", local_port=30077), ssh, show_progress=False)
