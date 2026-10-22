@@ -10,6 +10,7 @@ from contextlib import contextmanager
 
 from rich.console import Console
 
+from .config import ConfigError, env
 from .job import JobInfo
 from .ssh import SSHClient, StatusUnknownError, shell_path
 
@@ -20,17 +21,40 @@ console = Console()
 WAITING_STATES = {"SUBMITTED", "PENDING", "CONFIGURING", "REQUEUED", "RESIZING", "SUSPENDED", "UNKNOWN"}
 
 OOM_PATTERN = re.compile(r"OutOfMemoryError|CUDA out of memory|out of memory|\bOOM\b", re.IGNORECASE)
-# How long a job's status may stay unknown (e.g. a busy Slurm controller) before giving up
-STATUS_RETRY_LIMIT = 600
 
 KV_CACHE_PATTERN = re.compile(r"KV cache|max seq len|max_model_len|maximum model length", re.IGNORECASE)
 
 
-class _StatusTimer:
-    """Gives up once a job's status has been UNKNOWN for STATUS_RETRY_LIMIT seconds in a row."""
+DEFAULT_BUSY_TIMEOUT = 120
 
-    def __init__(self, job: JobInfo, ssh_client: SSHClient):
+
+def default_busy_timeout() -> int:
+    """How long (seconds) a job's status may stay unknown, e.g. while Slurm is busy, before giving
+    up: $SLURM_LLM_BUSY_TIMEOUT, or 2 minutes."""
+    value = env("BUSY_TIMEOUT")
+    if value is None:
+        return DEFAULT_BUSY_TIMEOUT
+    try:
+        seconds = int(value)
+    except ValueError:
+        seconds = -1
+    if seconds <= 0:
+        raise ConfigError(f"SLURM_LLM_BUSY_TIMEOUT must be a number of seconds, not {value!r}")
+    return seconds
+
+
+def _duration(seconds: int) -> str:
+    if seconds % 60:
+        return f"{seconds} seconds"
+    return "1 minute" if seconds == 60 else f"{seconds // 60} minutes"
+
+
+class _StatusTimer:
+    """Gives up once a job's status has been UNKNOWN for `limit` seconds in a row."""
+
+    def __init__(self, job: JobInfo, ssh_client: SSHClient, limit: int | None):
         self.job, self.ssh_client, self.since = job, ssh_client, None
+        self.limit = limit or default_busy_timeout()
 
     def update(self, status: str) -> None:
         if status != "UNKNOWN":
@@ -38,12 +62,12 @@ class _StatusTimer:
             return
         now = time.time()
         self.since = self.since or now
-        if now - self.since >= STATUS_RETRY_LIMIT:
+        if now - self.since >= self.limit:
             reason = getattr(self.ssh_client, "last_status_error", None) or "no answer"
             raise StatusUnknownError(
                 f"Could not check job {self.job.job_id} on {self.ssh_client.config.name} for "
-                f"{STATUS_RETRY_LIMIT // 60} minutes ({reason}). The job has not been cancelled; "
-                f"check it later with `sllm jobs`."
+                f"{_duration(self.limit)} ({reason}). The job has not been cancelled; check it later "
+                f"with `sllm jobs`. To wait longer, set SLURM_LLM_BUSY_TIMEOUT (seconds)."
             )
 
 
@@ -155,6 +179,7 @@ def wait_for_vllm_health(
     initial_interval: int = 5,
     max_interval: int = 30,
     show_progress: bool = True,
+    busy_timeout: int | None = None,
 ) -> bool:
     """Wait until the job's vLLM server answers /health.
 
@@ -165,7 +190,7 @@ def wait_for_vllm_health(
     log_path = shell_path(ssh_client.get_remote_slurm_log_path(job.job_id))
     start = last_check = time.time()
     interval = initial_interval
-    timer = _StatusTimer(job, ssh_client)
+    timer = _StatusTimer(job, ssh_client, busy_timeout)
     with _spinner(show_progress, f"Loading vLLM (job {job.job_id})..."):
         while True:
             if time.time() - last_check >= 30:
@@ -202,13 +227,15 @@ def wait_for_job_running(
     estimated_wait: int | None = 3600,
     poll_interval: int = 5,
     show_progress: bool = True,
+    busy_timeout: int | None = None,
 ) -> bool:
     """Wait until Slurm starts the job. Returns False if the job ends without running.
 
     `estimated_wait` is informational only; this waits as long as the job is queued (Ctrl+C to stop).
+    `busy_timeout` (default: `default_busy_timeout()`) limits how long the status may stay unknown.
     """
     previous = job.status
-    timer = _StatusTimer(job, ssh_client)
+    timer = _StatusTimer(job, ssh_client, busy_timeout)
     with _spinner(show_progress, f"Waiting for Slurm (job {job.job_id})..."):
         while True:
             status, node, _ = ssh_client.get_job_status(job.job_id)

@@ -100,12 +100,27 @@ def test_wait_gives_up_after_the_status_stays_unknown(fake_ssh, monkeypatch):
     ssh = fake_ssh()
     ssh.last_status_error = "squeue failed: Socket timed out"
     ssh.get_job_status = Mock(return_value=("UNKNOWN", None, None))
-    with pytest.raises(health.StatusUnknownError, match="(?s)job 77 on cluster-a for 10 minutes.*Socket timed out.*not been cancelled"):
+    with pytest.raises(health.StatusUnknownError, match="(?s)job 77 on cluster-a for 2 minutes.*Socket timed out.*not been cancelled"):
+        wait_for_job_running(_job(), ssh, Mock(), show_progress=False)
+
+
+def test_busy_timeout_is_settable(fake_ssh, monkeypatch):
+    clock = iter(range(0, 100_000, 60))
+    monkeypatch.setattr(health.time, "time", lambda: next(clock))
+    ssh = fake_ssh()
+    ssh.get_job_status = Mock(return_value=("UNKNOWN", None, None))
+    with pytest.raises(health.StatusUnknownError, match="for 5 minutes"):
+        wait_for_job_running(_job(), ssh, Mock(), show_progress=False, busy_timeout=300)
+    monkeypatch.setenv("SLURM_LLM_BUSY_TIMEOUT", "90")
+    with pytest.raises(health.StatusUnknownError, match="for 90 seconds.*SLURM_LLM_BUSY_TIMEOUT"):
+        wait_for_job_running(_job(), ssh, Mock(), show_progress=False)
+    monkeypatch.setenv("SLURM_LLM_BUSY_TIMEOUT", "2m")
+    with pytest.raises(health.ConfigError, match="must be a number of seconds"):
         wait_for_job_running(_job(), ssh, Mock(), show_progress=False)
 
 
 def test_unknown_streak_resets_when_a_check_works(fake_ssh, monkeypatch):
-    clock = iter(range(0, 100_000, 300))  # each check 5 minutes apart
+    clock = iter(range(0, 100_000, 90))  # each check 90 seconds apart
     monkeypatch.setattr(health.time, "time", lambda: next(clock))
     statuses = [("UNKNOWN", None), ("PENDING", None)] * 5 + [("RUNNING", "g1")]
     assert wait_for_job_running(_job(), _status_ssh(fake_ssh, statuses), Mock(), show_progress=False)

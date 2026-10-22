@@ -70,6 +70,9 @@ class OrchestratorConfig:
     show_progress: bool = True  # Show progress bars
     quiet: bool = False  # Suppress INFO logs (only show warnings and errors)
     exclude_clusters: list[str] | None = None  # Clusters to exclude from selection
+    # Seconds a job's status may stay unknown (e.g. Slurm busy) before giving up; None:
+    # $SLURM_LLM_BUSY_TIMEOUT, or 2 minutes
+    slurm_busy_timeout: int | None = None
 
 
 class JobOrchestrator:
@@ -300,6 +303,7 @@ class JobOrchestrator:
                         self.job_manager,
                         estimated_wait=3600,  # Default estimate for pending job
                         show_progress=self.config.show_progress,
+                        busy_timeout=self.config.slurm_busy_timeout,
                     )
                     if not success:
                         raise Exception(f"Job {existing_job.job_id} failed to reach RUNNING status")
@@ -326,6 +330,7 @@ class JobOrchestrator:
                         existing_job,
                         ssh_client,
                         show_progress=self.config.show_progress,
+                        busy_timeout=self.config.slurm_busy_timeout,
                     )
 
                     # Query model info to get max_model_length (only if not already set)
@@ -387,6 +392,7 @@ class JobOrchestrator:
                 self.job_manager,
                 estimated_wait=estimated_wait,
                 show_progress=self.config.show_progress,
+                busy_timeout=self.config.slurm_busy_timeout,
             )
 
             if not success:
@@ -415,6 +421,7 @@ class JobOrchestrator:
                 initial_interval=self.config.health_check_interval,
                 max_interval=self.config.max_health_check_interval,
                 show_progress=self.config.show_progress,
+                busy_timeout=self.config.slurm_busy_timeout,
             )
 
             # Query model info to get max_model_length
