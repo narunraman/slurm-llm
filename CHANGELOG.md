@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   load them too; the file's comments are kept. If a package is missing from the wheelhouse, setup
   stops and names `sllm setup --from-pypi PACKAGE` (or `all`) to allow PyPI for it. Other
   clusters are not affected.
+- An `sbatch` refusal that exits with code 255 (e.g. an invalid `#SBATCH` line) is reported as
+  sbatch's error, not as a lost answer. `sbatch_args` values with spaces (e.g.
+  `--comment=what this job is for`) are quoted in the job script.
 
 ### Changed
 - `RemoteLLM` is now `SlurmLLM`, and `RemoteLLMError` is now `SlurmLLMError`: the client also runs
