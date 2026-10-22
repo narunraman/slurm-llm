@@ -51,6 +51,15 @@ def test_wait_for_running(fake_ssh):
     assert manager.save_job.called
 
 
+def test_wait_for_running_never_caches_unknown(fake_ssh):
+    # UNKNOWN is not an active state: cached, the job would never be refreshed (or reused) again
+    manager = Mock()
+    job = _job(status="PENDING")
+    ssh = _status_ssh(fake_ssh, [("UNKNOWN", None), ("UNKNOWN", None), ("RUNNING", "g1")])
+    assert wait_for_job_running(job, ssh, manager, show_progress=False)
+    assert [c.args[0].status for c in manager.save_job.call_args_list] == ["RUNNING"]
+
+
 @pytest.mark.parametrize("final", ["FAILED", "OUT_OF_MEMORY", "NODE_FAIL", "NOT_FOUND", "CANCELLED"])
 def test_wait_for_running_stops_when_the_job_ends(fake_ssh, final):
     ssh = _status_ssh(fake_ssh, [("PENDING", None), (final, None)])

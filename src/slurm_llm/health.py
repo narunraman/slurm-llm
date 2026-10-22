@@ -183,6 +183,9 @@ def wait_for_job_running(
     with _spinner(show_progress, f"Waiting for Slurm (job {job.job_id})..."):
         while True:
             status, node, _ = ssh_client.get_job_status(job.job_id)
+            if status == "UNKNOWN":  # the check failed; keep the last known state (UNKNOWN is not cached)
+                time.sleep(poll_interval)
+                continue
             job.status = status
             if node:
                 job.node = node

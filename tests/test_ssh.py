@@ -106,6 +106,18 @@ def test_job_status(client, monkeypatch, completed):
     assert client.get_job_status("7")[0] == "UNKNOWN"
 
 
+def test_failed_status_checks_warn_once_per_reason(client, monkeypatch, completed, caplog):
+    missing = (127, "", "bash: squeue: command not found")
+    _record(monkeypatch, completed, [missing, missing, (0, "RUNNING|gpu3|1:00:00\n", ""), missing])
+    for _ in range(4):
+        client.get_job_status("7")
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    # repeated polls stay quiet; after a successful check, a new failure is reported again
+    assert warnings == [
+        "Could not check job status on cluster-a (squeue failed: bash: squeue: command not found); will keep trying"
+    ] * 2
+
+
 def test_submit_uploads_over_stdin_and_parses_the_job_id(client, monkeypatch, completed):
     calls = _record(monkeypatch, completed, [(0, "", ""), (0, "Submitted batch job 123\n", "")])
     assert client.submit_slurm_job("#!/bin/bash\n", "/home/alice/llm/job.slurm") == "123"

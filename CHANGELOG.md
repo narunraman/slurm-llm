@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   submitted duplicates and `sllm proxy` could not activate models. Anything the profile prints is
   dropped from command output (#3).
 - A failed `squeue` or `sacct` is no longer taken to mean the job has finished: the status is
-  `UNKNOWN` (or, in `sllm jobs`, the last known state) and a warning shows the error (#3).
+  `UNKNOWN` (or, in `sllm jobs`, the last known state) and a warning shows the error, once per
+  error rather than on every poll. `sllm prepare` keeps waiting and never records a job as
+  `UNKNOWN`, so an interrupted wait cannot hide the job from later runs (#3).
 
 ## [0.6.2] - 2026-10-01
 

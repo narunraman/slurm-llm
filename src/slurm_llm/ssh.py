@@ -48,6 +48,7 @@ class SSHClient:
             raise ConfigError(f"cluster '{cluster_config.name}': {e}") from None
         self.destination = transport.destination
         self.ssh_master_socket = str(transport.socket_path)
+        self._status_warning: str | None = None  # last "could not check" warning, so polls don't repeat it
 
     def _get_ssh_target(self) -> str:
         """The ssh destination ([user@]host or an alias from ~/.ssh/config)."""
@@ -185,6 +186,8 @@ class SSHClient:
         """
         job = shlex.quote(str(job_id))
         code, out, err = self.execute_command(f"squeue -j {job} -h -o '%T|%N|%L'")
+        if code == 0:
+            self._status_warning = None
         if code == 0 and out.strip():
             parts = out.strip().splitlines()[0].split("|")
             node = parts[1] if len(parts) > 1 and parts[1] else None
@@ -192,15 +195,21 @@ class SSHClient:
             return parts[0], node, time_left
         # squeue exits 1 with "Invalid job id" once the job has left the queue
         if code != 0 and "invalid job id" not in err.lower():
-            logger.warning(f"squeue failed on {self.config.name}: {err.strip() or f'exit code {code}'}")
-            return "UNKNOWN", None, None
+            return self._unknown_status(f"squeue failed: {err.strip() or f'exit code {code}'}")
         code, out, err = self.execute_command(f"sacct -j {job} -X -n -P -o State")
         if code == 0 and out.strip():
             return out.split()[0], None, None
         if code != 0:
-            logger.warning(f"sacct failed on {self.config.name}: {err.strip() or f'exit code {code}'}")
-            return "UNKNOWN", None, None
+            return self._unknown_status(f"sacct failed: {err.strip() or f'exit code {code}'}")
         return "NOT_FOUND", None, None
+
+    def _unknown_status(self, reason: str) -> tuple[str, None, None]:
+        """UNKNOWN, warning once per distinct reason (callers poll, and the reason rarely changes)."""
+        message = f"Could not check job status on {self.config.name} ({reason}); will keep trying"
+        if message != getattr(self, "_status_warning", None):
+            logger.warning(message)
+            self._status_warning = message
+        return "UNKNOWN", None, None
 
     def cancel_job(self, job_id: str) -> bool:
         code, _, _ = self.execute_command(f"scancel {shlex.quote(str(job_id))}")
