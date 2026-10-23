@@ -483,6 +483,8 @@ class JobOrchestrator:
             gpu_spec=gpu_spec,
             instance=instance,
         )
+        if self.job_manager.last_template and self.job_manager.last_template.yours:
+            console.print(f"    [dim]Job script from {self.job_manager.last_template.describe()}[/dim]")
         return self.job_manager.get_job(job_id)
 
     def _update_model_registry(self, model_name: str, **updates) -> bool:

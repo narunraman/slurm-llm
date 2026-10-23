@@ -71,6 +71,8 @@ def test_submit_writes_the_script_to_the_resolved_remote_root(manager, loader, f
     assert "#SBATCH --output=/home/alice/llm/slurm-%j.out" in script
     job = manager.get_job("4242")
     assert (job.model_id, job.cluster_name, job.instance, job.status) == (MODEL.id, "cluster-a", 2, "SUBMITTED")
+    # which template made the script, so a job can be matched to its source later
+    assert job.template.endswith("templates/vllm.slurm") and len(job.template_fingerprint) == 12
 
 
 def test_cache_prunes_old_submissions_and_tolerates_corruption(manager):
