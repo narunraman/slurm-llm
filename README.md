@@ -1,17 +1,10 @@
 # slurm-llm
 
-slurm-llm serves open language models with [vLLM](https://docs.vllm.ai) on your Slurm clusters and makes them
-available on your laptop as an OpenAI-compatible API at `http://localhost:8000/v1`. It sizes each job to the
-model's GPU memory, sends it to whichever cluster will start it soonest (using
-<a href="https://github.com/narunraman/rclust#gh-light-mode-only"><img src=".github/assets/github_logo_light.svg" height="14" alt=""></a><a href="https://github.com/narunraman/rclust#gh-dark-mode-only"><img src=".github/assets/github_logo_dark.svg" height="14" alt=""></a> [rclust](https://github.com/narunraman/rclust)),
-waits for the server to load, and forwards a port to it over SSH. Clusters with two-factor login work: you log in
-once and every later command reuses the connection. Nothing is installed on the cluster except a Python
-environment in a directory you choose.
+slurm-llm serves open language models with [vLLM](https://docs.vllm.ai) on your Slurm clusters and makes them available on your laptop as an OpenAI-compatible API at `http://localhost:8000/v1`. It sizes each job to the model's GPU memory, sends it to whichever cluster will start it soonest (using <a href="https://github.com/narunraman/rclust#gh-light-mode-only"><img src=".github/assets/github_logo_light.svg" height="14" alt=""></a><a href="https://github.com/narunraman/rclust#gh-dark-mode-only"><img src=".github/assets/github_logo_dark.svg" height="14" alt=""></a> [rclust](https://github.com/narunraman/rclust)), waits for the server to load, and forwards a port to it over SSH. Clusters with two-factor login work: you log in once and every later command reuses the connection.
 
 ## Run it
 
-You need Python 3.10+, OpenSSH and [uv](https://docs.astral.sh/uv/) on your machine, and a Slurm cluster with GPUs
-you can reach with `ssh`, whose login node can reach the internet.
+You need Python 3.10+, OpenSSH and [uv](https://docs.astral.sh/uv/) on your machine, and a Slurm cluster with GPUs you can reach with `ssh`, whose login node can reach the internet.
 
 ```bash
 uv tool install git+https://github.com/narunraman/slurm-llm@v0.8.0
@@ -44,9 +37,7 @@ client = OpenAI(base_url="http://localhost:8000/v1", api_key="unused")
 reply = client.chat.completions.create(model="qwen-3-8b", messages=[{"role": "user", "content": "Hello!"}])
 ```
 
-Several models can run at once; the proxy routes each request by its `model` field. Servers stop at their Slurm time
-limit, or with `sllm cancel JOB_ID`. For gated models (e.g. Llama), save a
-[Hugging Face token](https://huggingface.co/settings/tokens) with `sllm config hf-token` before `setup`.
+Several models can run at once; the proxy routes each request by its `model` field. Servers stop at their Slurm time limit, or with `sllm cancel JOB_ID`. For gated models (e.g. Llama), save a [Hugging Face token](https://huggingface.co/settings/tokens) with `sllm config hf-token` before `setup`.
 
 From Python, `SlurmLLM` does the same in one step, and `generate_batch` sends many requests in parallel:
 
@@ -58,8 +49,7 @@ with SlurmLLM("qwen-3-8b") as llm:     # submits or reuses a job, waits, opens a
     replies = llm.generate_batch([{"messages": [{"role": "user", "content": q}]} for q in ["2+2?", "A prime?"]])
 ```
 
-For jobs that run on the cluster itself, `submit_model("qwen-3-8b", instances=4)` starts servers without waiting
-and `SlurmLLM(model, local=True, nodes_dir=...)` connects to them from a compute node.
+For jobs that run on the cluster itself, `submit_model("qwen-3-8b", instances=4)` starts servers without waiting and `SlurmLLM(model, local=True, nodes_dir=...)` connects to them from a compute node.
 
 ## Commands
 
