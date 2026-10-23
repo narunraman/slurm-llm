@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-10-23
+
+Fixes for clusters set up like Alliance Canada's (#1, #2, #3).
 
 ### Added
 - Templates say where they come from (#1). `sllm config validate` lists each cluster's job and
@@ -16,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warning per new built-in version and the command to compare them.
 
 ### Changed
+- slurm-llm now depends on a released version of rclust (`v0.3.4`) instead of its latest commit, so
+  installing a given slurm-llm release always gives the same rclust.
 - `RemoteLLM` is now `SlurmLLM`, and `RemoteLLMError` is now `SlurmLLMError`: the client also runs
   on the cluster itself (`local=True`), so "remote" no longer described it. The old names still
   work, with a `DeprecationWarning`, and will be removed in a future release.
