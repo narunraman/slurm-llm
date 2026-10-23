@@ -11,19 +11,13 @@ from __future__ import annotations
 import logging
 import re
 import shlex
-import subprocess
-import sys
-import tempfile
 import time
-from pathlib import Path
 
 from .config import ClusterConfig, ConfigError, SlurmLLMError
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_PERSIST = "1h"  # how long an idle master connection stays open (ssh ControlPersist)
-# Printed before a command in a login shell; anything a site profile prints before it is dropped
-OUTPUT_MARKER = "SLURM_LLM_OUTPUT_START"
 SLURM_HINT = "Check that `bash -lc {command}` works on {name}."
 
 
@@ -58,18 +52,23 @@ def shell_path(path: str) -> str:
 
 
 class SSHClient:
-    """Runs commands on one cluster over a shared SSH connection."""
+    """Runs commands on one cluster over a shared SSH connection.
+
+    The connection itself (logging in once, keeping it alive, noticing when it is gone) is
+    rclust's: slurm-llm and rclust share one transport and one connection per cluster.
+    """
 
     def __init__(self, cluster_config: ClusterConfig):
-        from rclust.ssh import SSHClient as RclustSSHClient
+        from rclust.ssh import SSHClient as Transport
 
         self.config = cluster_config
         try:
-            transport = RclustSSHClient(cluster_config.host, cluster_config.user, name=cluster_config.name)
+            self.transport = Transport(cluster_config.host, cluster_config.user, name=cluster_config.name)
         except ValueError as e:
             raise ConfigError(f"cluster '{cluster_config.name}': {e}") from None
-        self.destination = transport.destination
-        self.ssh_master_socket = str(transport.socket_path)
+        self.transport.connect_command = "sllm connect"  # what its messages tell you to run
+        self.destination = self.transport.destination
+        self.ssh_master_socket = str(self.transport.socket_path)
         self._status_warning: str | None = None  # last "could not check" warning, so polls don't repeat it
         self.last_status_error: str | None = None  # why the last status check gave UNKNOWN
 
@@ -77,20 +76,9 @@ class SSHClient:
         """The ssh destination ([user@]host or an alias from ~/.ssh/config)."""
         return self.destination
 
-    def _ssh(self, *options: str) -> list[str]:
-        return ["ssh", "-o", "ConnectTimeout=10", *options, "-S", self.ssh_master_socket]
-
     def has_active_connection(self) -> bool:
         """Whether a master connection is open (checked locally, without contacting the cluster)."""
-        if not Path(self.ssh_master_socket).exists():
-            return False
-        try:
-            result = subprocess.run(
-                self._ssh("-O", "check") + [self.destination], capture_output=True, timeout=10
-            )
-            return result.returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            return False
+        return self.transport.is_connected()
 
     def connect(self, interactive: bool = True, persist: str | None = None) -> None:
         """Open a master connection unless one is already open.
@@ -99,42 +87,14 @@ class SSHClient:
         answered. Otherwise the login must succeed without prompting (e.g. SSH keys), and
         NotConnectedError tells the user to run `sllm connect`.
         """
-        if self.has_active_connection():
-            return
-        socket = Path(self.ssh_master_socket)
-        socket.unlink(missing_ok=True)  # a socket left behind by a master that has exited
-        socket.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        cmd = self._ssh("-M", "-o", f"ControlPersist={persist or DEFAULT_PERSIST}", "-f", "-N")
-        name = self.config.name
+        from rclust.ssh import NotConnectedError as TransportNotConnected
+
         try:
-            if interactive:
-                print(
-                    f"Connecting to {name} ({self.destination}); answer any password or two-factor prompts...",
-                    file=sys.stderr,
-                )
-                result = subprocess.run(cmd + [self.destination], timeout=300)
-                detail = f"ssh exit code {result.returncode}"
-            else:
-                # stderr goes to a file, not a pipe: a pipe could stay open in the backgrounded master
-                with tempfile.TemporaryFile("w+") as err:
-                    result = subprocess.run(
-                        cmd[:1] + ["-o", "BatchMode=yes"] + cmd[1:] + [self.destination],
-                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err, timeout=60,
-                    )
-                    err.seek(0)
-                    lines = err.read().strip().splitlines()
-                detail = lines[-1] if lines else f"ssh exit code {result.returncode}"
-        except subprocess.TimeoutExpired:
-            result, detail = None, "timed out"
+            self.transport.connect(persist=persist or DEFAULT_PERSIST, interactive=interactive)
+        except TransportNotConnected as e:
+            raise NotConnectedError(str(e), self.config.name) from None
         except OSError as e:
-            raise NotConnectedError(f"Could not run ssh: {e}") from None
-        if result is None or result.returncode != 0 or not self.has_active_connection():
-            hint = (
-                f"Check that `ssh {self.destination}` works."
-                if interactive
-                else f"Run `sllm connect {name}` to log in (it can answer password or two-factor prompts)."
-            )
-            raise NotConnectedError(f"Could not connect to {name} ({self.destination}): {detail}. {hint}", name)
+            raise NotConnectedError(f"Could not run ssh: {e}", self.config.name) from None
 
     def execute_command(
         self,
@@ -148,38 +108,13 @@ class SSHClient:
         `input` is sent on stdin (use it for secrets, which must not appear in command lines).
         With `use_login_shell` (the default), the command runs under `bash -l` so site profiles are
         loaded: on some clusters only they put Slurm on the PATH and set SLURM_CONF and $SCRATCH.
+        A lost connection, including one that stopped responding, gives exit code 255.
         """
-        if use_login_shell:
-            command = f"bash -l -c {shlex.quote(f'echo {OUTPUT_MARKER}; {command}')}"
-        cmd = self._ssh("-o", "BatchMode=yes", "-o", "ControlMaster=no") + [self.destination, command]
-        try:
-            result = subprocess.run(cmd, input=input, capture_output=True, text=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return -1, "", "Command timed out"
-        except OSError as e:
-            return -1, "", str(e)
-        stdout, stderr = result.stdout, result.stderr
-        if use_login_shell:
-            _, found, rest = stdout.partition(OUTPUT_MARKER + "\n")
-            stdout = rest if found else stdout
-        if result.returncode == 255 and not self.has_active_connection():
-            detail = stderr.strip().splitlines()[-1] if stderr.strip() else "ssh failed"
-            stderr = f"not connected to {self.config.name} ({detail}); run `sllm connect {self.config.name}`"
-        return result.returncode, stdout, stderr
+        return self.transport.execute_command(command, timeout=timeout, use_login_shell=use_login_shell, input=input)
 
     def execute_command_streaming(self, command: str, timeout: int = 300) -> int:
-        """Run a command with its output shown live in the terminal. Returns the exit code.
-
-        LogLevel=ERROR hides ssh's "Shared connection to ... closed." line (printed at the INFO
-        level after every session with a terminal) but still shows connection errors.
-        """
-        cmd = self._ssh("-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "LogLevel=ERROR", "-tt")
-        cmd += [self.destination, command]
-        try:
-            return subprocess.run(cmd, timeout=timeout).returncode
-        except subprocess.TimeoutExpired:
-            print(f"\nCommand timed out after {timeout}s", file=sys.stderr)
-            return -1
+        """Run a command with its output shown live in the terminal. Returns the exit code."""
+        return self.transport.execute_streaming(command, timeout=timeout)
 
     def resolve_dir(self, path: str) -> str:
         """Create a remote directory if needed and return its absolute path."""
