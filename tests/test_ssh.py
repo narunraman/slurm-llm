@@ -56,15 +56,15 @@ def test_commands_run_in_a_login_shell_by_default(client, monkeypatch, completed
     # on some clusters only the login profile puts Slurm on the PATH and sets SLURM_CONF and $SCRATCH
     calls = _record(monkeypatch, completed, [])
     client.execute_command("sbatch 'x y'")
-    assert calls[0][0][-1] == "bash -l -c 'echo SLURM_LLM_OUTPUT_START; sbatch '\"'\"'x y'\"'\"''"
+    assert calls[0][0][-1] == "bash -l -c 'echo RCLUST_OUTPUT_START; sbatch '\"'\"'x y'\"'\"''"
 
 
 def test_login_shell_drops_what_the_profile_prints(client, monkeypatch, completed):
-    _record(monkeypatch, completed, [(0, "Welcome to the cluster!\nSLURM_LLM_OUTPUT_START\nRUNNING|gpu3|1:00\n", "")])
-    assert client.execute_command("squeue")[1] == "RUNNING|gpu3|1:00\n"
+    _record(monkeypatch, completed, [(0, "Welcome to the cluster!\nRCLUST_OUTPUT_START\nRUNNING|gpu3|1:00\n", "")])
+    assert client.execute_command("squeue")[1] == "RUNNING|gpu3|1:00"  # rclust trims surrounding whitespace
     # no marker (e.g. the profile exited early): the output is passed on unchanged
     _record(monkeypatch, completed, [(1, "oops\n", "")])
-    assert client.execute_command("squeue")[1] == "oops\n"
+    assert client.execute_command("squeue")[1] == "oops"
 
 
 def test_not_connected_error_names_the_fix(client, monkeypatch, completed):
@@ -104,7 +104,7 @@ def test_failed_status_checks_are_never_read_as_finished_jobs(client, monkeypatc
     _record(monkeypatch, completed, [(0, "", ""), (1, "", "sacct: error: Problem talking to the database")])
     assert client.get_job_status("7")[0] == "UNKNOWN"
     # a network blip while the master connection stays up: also worth retrying
-    monkeypatch.setattr(SSHClient, "has_active_connection", lambda self: True)
+    monkeypatch.setattr("rclust.ssh.SSHClient.is_connected", lambda self: True)
     _record(monkeypatch, completed, [(255, "", "Connection reset")])
     assert client.get_job_status("7")[0] == "UNKNOWN"
 
@@ -114,7 +114,7 @@ def test_failed_status_checks_are_never_read_as_finished_jobs(client, monkeypatc
     "squeue: fatal: Could not establish a configuration source",
 ])
 def test_missing_slurm_is_an_error_not_a_retry(client, monkeypatch, completed, error):
-    monkeypatch.setattr(SSHClient, "has_active_connection", lambda self: True)
+    monkeypatch.setattr("rclust.ssh.SSHClient.is_connected", lambda self: True)
     _record(monkeypatch, completed, [(127 if "not found" in error else 1, "", error)])
     with pytest.raises(SlurmUnavailableError, match="(?s)Could not check job 7 on cluster-a.*not been cancelled. Check that `bash -lc squeue` works on cluster-a"):
         client.get_job_status("7")
@@ -143,7 +143,7 @@ def test_submit_uploads_over_stdin_and_parses_the_job_id(client, monkeypatch, co
     calls = _record(monkeypatch, completed, [(0, "", ""), (0, "Submitted batch job 123\n", "")])
     assert client.submit_slurm_job("#!/bin/bash\n", "/home/alice/llm/job.slurm") == "123"
     assert calls[0][1]["input"] == "#!/bin/bash\n"
-    assert calls[1][0][-1].startswith("bash -l -c 'echo SLURM_LLM_OUTPUT_START; sbatch ")
+    assert calls[1][0][-1].startswith("bash -l -c 'echo RCLUST_OUTPUT_START; sbatch ")
 
 
 def test_streaming_hides_the_shared_connection_closed_message(client, monkeypatch, completed):
@@ -158,7 +158,7 @@ SCRIPT = "#!/bin/bash\n#SBATCH --job-name=vllm-qwen\nvllm serve\n"
 
 @pytest.fixture
 def connected(monkeypatch):
-    monkeypatch.setattr(SSHClient, "has_active_connection", lambda self: True)
+    monkeypatch.setattr("rclust.ssh.SSHClient.is_connected", lambda self: True)
     monkeypatch.setattr("slurm_llm.ssh.time.sleep", lambda s: None)
 
 
@@ -184,7 +184,7 @@ def test_sbatch_without_an_answer_and_no_new_job(client, monkeypatch, completed,
 
 
 def test_sbatch_connection_lost_may_have_submitted(client, monkeypatch, completed):
-    monkeypatch.setattr(SSHClient, "has_active_connection", lambda self: False)  # only asked after a 255
+    monkeypatch.setattr("rclust.ssh.SSHClient.is_connected", lambda self: False)  # only asked after a 255
     _record(monkeypatch, completed, [(0, "", ""), (0, "", ""), (255, "", "Broken pipe")])
     with pytest.raises(NotConnectedError, match="may have been submitted.*will find the job"):
         client.submit_slurm_job(SCRIPT, "~/x.slurm")

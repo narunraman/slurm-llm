@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- slurm-llm uses rclust's SSH transport instead of its own copy, so both share one implementation
+  of logging in, running commands and noticing lost connections.
+
+### Fixed
+- A shared connection whose network is gone (laptop asleep, Wi-Fi changed) is reported as a lost
+  connection, so `sllm prepare` offers to log in again, instead of as a busy Slurm that is retried
+  for 2 minutes. Shared connections now use ssh keepalives, and a command that times out is
+  followed by a quick check of the connection (from rclust).
+
 ## [0.7.0] - 2026-10-23
 
 Fixes for clusters set up like Alliance Canada's (#1, #2, #3).

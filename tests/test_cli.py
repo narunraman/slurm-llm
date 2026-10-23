@@ -86,8 +86,8 @@ def test_not_connected_cluster_is_explained(run, completed):
 
 @pytest.mark.parametrize("missing, code", [("", 0), ("squeue\nsacct\n", 1)])
 def test_connect_checks_that_slurm_works(run, completed, missing, code):
-    with patch("slurm_llm.ssh.SSHClient.has_active_connection", return_value=True), \
-         patch("subprocess.run", lambda cmd, **kw: completed(0, "SLURM_LLM_OUTPUT_START\n" + missing, "")):
+    with patch("rclust.ssh.SSHClient.is_connected", return_value=True), \
+         patch("subprocess.run", lambda cmd, **kw: completed(0, "RCLUST_OUTPUT_START\n" + missing, "")):
         result = run("connect", "cluster-a")
     assert result.exit_code == code, result.output
     assert "cluster-a: already connected" in result.output
