@@ -156,7 +156,7 @@ def init(force: bool, copy_templates: bool):
 
     import yaml
 
-    from .config import PACKAGE_DIR, rclust_config_path, rclust_gpu_types, read_hf_token, tilde, user_template_dir
+    from .config import PACKAGE_DIR, rclust_config_path, read_hf_token, tilde, user_template_dir
 
     loader = _loader()
     config_dir = loader.config_dir
@@ -189,6 +189,7 @@ def init(force: bool, copy_templates: bool):
         lines = [
             "# slurm-llm settings for each cluster in rclust's config; see",
             f"# {tilde(PACKAGE_DIR / 'configs' / 'clusters.example.yaml')} for all options.",
+            "# GPU types and their memory come from rclust's config (`rclust discover` finds them).",
             "clusters:",
         ]
         for name, base in rclust_clusters.items():
@@ -198,11 +199,6 @@ def init(force: bool, copy_templates: bool):
                 "    model_path:          # required: directory with room for model weights, e.g. $SCRATCH/models",
                 "    setup_commands: []   # e.g. [\"module load python/3.12 cuda/12.4\"]",
             ]
-            gpu_types = rclust_gpu_types(base)
-            if gpu_types:
-                lines.append("    gpu_types:           # memory (GB) of each GPU type in rclust's config")
-                for g in gpu_types:
-                    lines += [f"      - type: {g.get('type')}", f"        memory: {g.get('memory', '')}"]
         write("clusters.yaml", "\n".join(lines) + "\n")
 
     if copy_templates:
@@ -1014,11 +1010,17 @@ def config_view():
 @click.option("--check-ssh", is_flag=True, help="Also check the SSH connection to each cluster.")
 def config_validate(check_ssh: bool):
     """Check the configuration for mistakes (exits 1 if there are errors)."""
-    from .config import read_hf_token
+    import yaml
+
+    from .config import rclust_gpu_definitions, read_hf_token
     from .template_source import resolve_template
 
     loader = _loader()
     errors, warnings, templates = [], [], []
+    try:
+        rclust_clusters = (yaml.safe_load(loader.rclust_config_path().read_text()) or {}).get("clusters") or {}
+    except (OSError, yaml.YAMLError, AttributeError):
+        rclust_clusters = {}
     clusters = {}
     try:
         clusters = loader.load_clusters()
@@ -1047,10 +1049,19 @@ def config_validate(check_ssh: bool):
     for name, cfg in clusters.items():
         if not cfg.model_path:
             errors.append(f"cluster '{name}': model_path is not set")
-        if not cfg.gpu_types:
+        sized = {g.type for g in cfg.gpu_types}
+        try:
+            unknown = [d["type"] for d in rclust_gpu_definitions(name, rclust_clusters.get(name)) if d["type"] not in sized]
+        except Exception:
+            unknown = []
+        for gpu in unknown:
             warnings.append(
-                f"cluster '{name}': no GPU type with a memory (GB) in clusters.yaml, so every job asks for one GPU"
+                f"cluster '{name}': the memory of GPU type '{gpu}' is unknown, so it is not used; set `memory:` "
+                "for it under gpu_types in rclust's config (`rclust discover --save` asks for it)"
             )
+        if not cfg.gpu_types and not unknown:
+            warnings.append(f"cluster '{name}': no GPU types in rclust's config (`rclust discover` finds them), "
+                            "so every job asks for one GPU")
         if cfg.gpu_allocation_mode not in ("per-node", "flexible"):
             errors.append(f"cluster '{name}': gpu_allocation_mode must be per-node or flexible")
         for kind, template in (("job", cfg.slurm_template), ("setup", cfg.setup_template)):
@@ -1133,15 +1144,18 @@ def config_cluster(cluster_name: str | None):
         "Request GPUs per node (--gpus-per-node) or anywhere (--gpus)",
         choices=["per-node", "flexible"], default=cfg.gpu_allocation_mode,
     )
-    from .config import rclust_gpu_types
+    from .config import rclust_gpu_definitions
 
     rclust_cluster = (yaml.safe_load(loader.rclust_config_path().read_text()) or {})["clusters"][cluster_name]
+    # only GPUs whose memory rclust does not know (its config, or the GPU's name)
     known = {g.type: g.memory for g in cfg.gpu_types}
-    gpu_types = []
-    for g in rclust_gpu_types(rclust_cluster):
+    gpu_types = [g for g in entry.get("gpu_types") or [] if isinstance(g, dict)]
+    for g in rclust_gpu_definitions(cluster_name, rclust_cluster):
+        if g["memory"] is not None:
+            continue
         memory = Prompt.ask(f"Memory of one {g['type']} GPU in GB", default=str(known.get(g["type"], "")) or None)
         if memory and memory.isdigit():
-            gpu_types.append({"type": g["type"], "memory": int(memory)})
+            gpu_types = [t for t in gpu_types if t.get("type") != g["type"]] + [{"type": g["type"], "memory": int(memory)}]
     if gpu_types:
         entry["gpu_types"] = gpu_types
     data["clusters"][cluster_name] = entry
