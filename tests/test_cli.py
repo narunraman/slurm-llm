@@ -100,7 +100,9 @@ def test_init_writes_a_cluster_entry_for_each_rclust_cluster(run, isolated_home)
     result = run("init")
     assert result.exit_code == 0, result.output
     text = (isolated_home / ".config/slurm-llm/clusters.yaml").read_text()
-    assert "cluster-a:" in text and "cluster-b:" in text and "- type: a100" in text
+    assert "cluster-a:" in text and "cluster-b:" in text
+    assert "gpu_types" not in text.split("\n", 3)[3]  # GPU types stay in rclust's config
+    assert "GPU types and their memory come from rclust's config" in text
     assert (isolated_home / ".config/slurm-llm/model_registry.yaml").exists()
 
 
@@ -252,13 +254,15 @@ def test_kill_cancels_forwards_left_by_the_stopped_proxy(run, monkeypatch, compl
     assert calls[0][-4:] == ["cancel", "-L", "30000:g1:35000", "hpc1.example.org"]
 
 
-def test_init_reads_gpu_types_under_resources(run, isolated_home):
+def test_validate_names_gpu_types_with_unknown_memory(run, isolated_home):
+    # an A100 may have 40 or 80 GB; an H100 always has 80
     (isolated_home / ".config/rclust/config.yaml").write_text(
-        "clusters:\n  c1:\n    resources:\n      gpu_types: [{type: h100, slurm_spec: h100}]\n"
+        "clusters:\n  c1:\n    resources:\n      gpus: [a100, h100]\n"
     )
-    (isolated_home / ".config/slurm-llm/clusters.yaml").unlink()
-    assert run("init").exit_code == 0
-    assert "- type: h100" in (isolated_home / ".config/slurm-llm/clusters.yaml").read_text()
+    (isolated_home / ".config/slurm-llm/clusters.yaml").write_text("clusters:\n  c1:\n    model_path: /m\n")
+    output = " ".join(run("config", "validate").output.split())
+    assert "the memory of GPU type 'a100' is unknown" in output and "rclust discover --save" in output
+    assert "'h100'" not in output
 
 
 def test_config_validate_warns_about_clusters_missing_from_either_config(run, isolated_home):

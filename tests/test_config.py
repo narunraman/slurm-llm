@@ -27,12 +27,16 @@ def test_clusters_merge_rclust_and_slurm_llm_settings(loader):
     assert [(g.type, g.slurm_spec) for g in b.gpu_types] == [("l40s", "l40s")]  # defined only in clusters.yaml
 
 
-def test_host_defaults_to_cluster_name_and_gpu_types_without_memory_are_skipped(isolated_home, loader):
-    (isolated_home / ".config/rclust/config.yaml").write_text("clusters:\n  myalias:\n    gpu_types: [{type: h100}]\n")
+def test_host_defaults_to_cluster_name_and_gpu_memory_comes_from_rclust(isolated_home, loader):
+    (isolated_home / ".config/rclust/config.yaml").write_text(
+        "clusters:\n  myalias:\n    gpu_types: [{type: h100}, {type: a100}, {type: a100_3g, slurm_spec: a100_3g.40gb}]\n"
+    )
     (isolated_home / ".config/slurm-llm/clusters.yaml").unlink()
     cluster = loader.load_clusters()["myalias"]
     assert cluster.host == "myalias"
-    assert cluster.gpu_types == []
+    # memory from the GPU's name (H100: always 80 GB; MIG slices spell theirs out); an A100's
+    # memory is unknown (40 or 80 GB), so it is not used
+    assert [(g.type, g.memory, g.is_full_gpu) for g in cluster.gpu_types] == [("h100", 80, True), ("a100_3g", 40, False)]
     assert cluster.model_path is None
 
 

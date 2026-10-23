@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - slurm-llm uses rclust's SSH transport instead of its own copy, so both share one implementation
   of logging in, running commands and noticing lost connections.
+- GPU types, and their memory, come from rclust's config: rclust reads the memory from the GPU's
+  name where it says (e.g. `nvidia_h100_80gb_hbm3`, `h100_3g.40gb`, `l40s`) or from `memory:`
+  under `gpu_types`, and `rclust discover --save` asks for the rest. `gpu_types` in
+  `clusters.yaml` is now only needed to override them; `sllm init` no longer writes it, and
+  `sllm config validate` names GPU types whose memory is unknown.
 
 ### Fixed
 - A shared connection whose network is gone (laptop asleep, Wi-Fi changed) is reported as a lost

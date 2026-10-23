@@ -276,7 +276,7 @@ class ConfigLoader:
                 model_path=extra.get("model_path"),
                 slurm_template=extra.get("slurm_template", "vllm.slurm"),
                 setup_template=extra.get("setup_template", "setup_venv.sh"),
-                gpu_types=_merge_gpu_types(name, rclust_gpu_types(base), extra.get("gpu_types") or []),
+                gpu_types=_merge_gpu_types(name, rclust_gpu_definitions(name, base), extra.get("gpu_types") or []),
                 gpu_allocation_mode=extra.get("gpu_allocation_mode", "per-node"),
                 require_single_node=bool(extra.get("require_single_node", base.get("require_single_node", False))),
                 setup_commands=_as_list(extra.get("setup_commands")),
@@ -482,14 +482,19 @@ class ConfigLoader:
         return _load_yaml(path).get("cluster_preferences") or {}
 
 
-def rclust_gpu_types(cluster: dict | None) -> list:
-    """GPU types of a cluster entry in rclust's config, which accepts them at the top level of the
-    cluster or under `resources:` (the top level wins, as in rclust)."""
-    cluster = cluster if isinstance(cluster, dict) else {}
-    if "gpu_types" in cluster:
-        return cluster.get("gpu_types") or []
-    resources = cluster.get("resources")
-    return (resources.get("gpu_types") or []) if isinstance(resources, dict) else []
+def rclust_gpu_definitions(name: str, cluster: dict | None) -> list[dict]:
+    """GPU types of a cluster in rclust's config, with their Slurm spec, memory and MIG flag.
+
+    rclust reads the memory from the config (`memory:` under `gpu_types`) or from the GPU's name
+    (e.g. nvidia_h100_80gb_hbm3, h100_3g.40gb, l40s); it is None when neither says.
+    """
+    from rclust.config import ClusterConfig as RclustCluster
+    from rclust.config import ConfigError as RclustConfigError
+
+    try:
+        return RclustCluster.from_dict(name, cluster).gpu_definitions()
+    except RclustConfigError as e:
+        raise ConfigError(f"{rclust_config_path()}: {e}") from None
 
 
 def _as_list(value) -> list[str]:
@@ -500,17 +505,20 @@ def _as_list(value) -> list[str]:
     return [str(v) for v in value]
 
 
-def _merge_gpu_types(cluster: str, base: list, extra: list) -> list[GPUType]:
-    """GPU types from rclust's config, completed by entries of the same type in clusters.yaml.
+def _merge_gpu_types(cluster: str, base: list[dict], extra: list) -> list[GPUType]:
+    """GPU types from rclust's config (see rclust_gpu_definitions), with clusters.yaml's entries
+    of the same type overriding them (or adding types). Types without a memory are not used."""
+    from rclust.gpus import gpu_memory_gb, is_mig
 
-    rclust only needs a type's name and Slurm spec; slurm-llm also needs its memory (GB) to size
-    jobs, which may be given in either file. Types without a memory are not used for sizing.
-    """
-    specs: dict[str, dict] = {}
-    for g in [*base, *extra]:
+    specs: dict[str, dict] = {d["type"]: {**d, "is_full_gpu": not d["mig"]} for d in base}
+    for g in extra:
         if not isinstance(g, dict) or not g.get("type"):
             raise ConfigError(f"cluster '{cluster}': every GPU type needs a 'type'")
-        specs[g["type"]] = {**specs.get(g["type"], {}), **g}
+        spec = {**specs.get(g["type"], {}), **{k: v for k, v in g.items() if v is not None}}
+        name = spec.get("slurm_spec") or spec["type"]
+        spec.setdefault("memory", gpu_memory_gb(name))
+        spec.setdefault("is_full_gpu", not is_mig(name))
+        specs[g["type"]] = spec
     merged = []
     for spec in specs.values():
         if spec.get("memory") is None:
@@ -521,7 +529,7 @@ def _merge_gpu_types(cluster: str, base: list, extra: list) -> list[GPUType]:
                 type=spec["type"],
                 memory=int(spec["memory"]),
                 slurm_spec=spec.get("slurm_spec"),
-                is_full_gpu=spec.get("is_full_gpu", True),
+                is_full_gpu=bool(spec.get("is_full_gpu", True)),
             )
         )
     return merged
