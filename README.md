@@ -27,11 +27,11 @@ It works with clusters that require two-factor authentication: you log in once w
 ## Install
 
 ```bash
-uv tool install git+https://github.com/narunraman/slurm-llm@v0.7.0
-# or: pipx install git+https://github.com/narunraman/slurm-llm@v0.7.0
+uv tool install git+https://github.com/narunraman/slurm-llm@v0.8.0
+# or: pipx install git+https://github.com/narunraman/slurm-llm@v0.8.0
 ```
 
-Leave out `@v0.7.0` for the latest development version; [releases](https://github.com/narunraman/slurm-llm/releases) lists the others.
+Leave out `@v0.8.0` for the latest development version; [releases](https://github.com/narunraman/slurm-llm/releases) lists the others.
 
 This installs the `sllm` command and its dependency [rclust](https://github.com/narunraman/rclust), which slurm-llm uses to describe clusters and estimate queue times.
 
