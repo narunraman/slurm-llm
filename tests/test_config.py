@@ -198,3 +198,42 @@ def test_old_names_still_work_with_a_warning(module):
     if module == "slurm_llm":
         with pytest.warns(DeprecationWarning):
             assert slurm_llm.RemoteLLMError is slurm_llm.SlurmLLMError
+
+
+CLUSTERS_WITH_COMMENTS = """\
+# my clusters
+clusters:
+  cluster-a:
+    remote_root: ~/llm  # where logs go
+    setup_commands:
+      - module load python/3.12   # same Python as setup
+    gpu_types:
+      - type: a100
+        memory: 80
+  cluster-b:
+    model_path: /data/models
+"""
+
+
+@pytest.mark.parametrize("cluster, setup_commands", [
+    ("cluster-a", ["module load python/3.12", "module load gcc opencv"]),
+    ("cluster-b", ["module load gcc opencv"]),  # no setup_commands yet
+])
+def test_add_setup_command_keeps_comments(isolated_home, cluster, setup_commands):
+    loader = ConfigLoader()
+    path = loader.config_dir / "clusters.yaml"
+    path.write_text(CLUSTERS_WITH_COMMENTS)
+    assert loader.add_setup_command(cluster, "module load gcc opencv")
+    text = path.read_text()
+    assert "# my clusters" in text and "# where logs go" in text and "# same Python as setup" in text
+    assert loader.get_cluster(cluster).setup_commands == setup_commands
+    assert loader.get_cluster("cluster-a").gpu_types[0].memory == 80
+
+
+def test_add_setup_command_leaves_unusual_files_alone(isolated_home):
+    loader = ConfigLoader()
+    path = loader.config_dir / "clusters.yaml"
+    path.write_text("clusters:\n  cluster-a:\n    setup_commands: [module load python/3.12]\n")
+    assert not loader.add_setup_command("cluster-a", "module load gcc opencv")
+    assert path.read_text() == "clusters:\n  cluster-a:\n    setup_commands: [module load python/3.12]\n"
+    assert not loader.add_setup_command("no-such-cluster", "x")

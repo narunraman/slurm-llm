@@ -203,3 +203,12 @@ def test_slurm_problem_names_missing_commands(client, monkeypatch, completed, co
     assert client.slurm_problem() == (
         "sacct, scancel not found, even in a login shell. Check that `bash -lc sacct` works on cluster-a."
     )
+
+
+def test_sbatch_refusal_with_exit_255_is_not_a_lost_answer(client, monkeypatch, completed, connected):
+    # sbatch exits 255 for an invalid #SBATCH line, as ssh does when the connection drops
+    err = "sbatch: error: Invalid directive found in batch script: PR"
+    calls = _record(monkeypatch, completed, [(0, "", ""), (0, "", ""), (255, "", err)])
+    with pytest.raises(SlurmLLMError, match="sbatch failed on cluster-a: sbatch: error: Invalid directive"):
+        client.submit_slurm_job(SCRIPT, "~/x.slurm")
+    assert len(calls) == 3  # no search of the queue

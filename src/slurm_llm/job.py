@@ -88,6 +88,14 @@ def cluster_time_to_local(timestamp: str, clock: tuple[int, str] | None) -> date
     return when
 
 
+def sbatch_directive(arg: str) -> str:
+    """An sbatch option for a #SBATCH line, its value quoted if it has spaces (sbatch splits on them)."""
+    option, eq, value = arg.partition("=")
+    if eq and option.startswith("-") and any(c.isspace() for c in value) and not value.startswith(('"', "'")):
+        return f'{option}="{value}"'
+    return arg
+
+
 def model_snapshot_expr(model_path: str, model_id: str) -> str:
     """Shell expression for the model's snapshot directory in a Hugging Face cache.
 
@@ -297,7 +305,7 @@ class JobManager:
             nodes_arg = ""
 
         sbatch_lines = [f"#SBATCH --account={cluster_config.account}"] if cluster_config.account else []
-        sbatch_lines += [f"#SBATCH {arg}" for arg in cluster_config.sbatch_args]
+        sbatch_lines += [f"#SBATCH {sbatch_directive(arg)}" for arg in cluster_config.sbatch_args]
         for value in [resource_config.time, str(output_dir or ""), gpu_slurm_arg, *sbatch_lines]:
             if "\n" in value or "\r" in value:
                 raise ConfigError("Slurm settings must not contain newlines")

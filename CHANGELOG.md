@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   work, with a `DeprecationWarning`, and will be removed in a future release.
 
 ### Fixed
+- `sllm setup` works on clusters with a managed Python wheelhouse (e.g. Alliance Canada, #2). It
+  finds the wheelhouse in pip's settings and installs from it only (`pip install --no-index`,
+  without uv, which ignores pip's settings). Packages the cluster provides as modules (OpenCV on
+  Alliance) are loaded and added to the cluster's `setup_commands` in `clusters.yaml`, so jobs
+  load them too; the file's comments are kept. If a package is missing from the wheelhouse, setup
+  stops and names `sllm setup --from-pypi PACKAGE` (or `all`) to allow PyPI for it. Other
+  clusters are not affected.
+- An `sbatch` refusal that exits with code 255 (e.g. an invalid `#SBATCH` line) is reported as
+  sbatch's error, not as a lost answer. `sbatch_args` values with spaces (e.g.
+  `--comment=what this job is for`) are quoted in the job script.
 - Every command on a cluster now runs in a login shell, as `sbatch` already did. On clusters where
   only the login profile puts Slurm on the PATH and sets `SLURM_CONF` and `$SCRATCH` (e.g. Alliance
   Canada), status checks used to fail, so jobs were reported as `NOT_FOUND`, `sllm prepare`

@@ -247,8 +247,11 @@ class SSHClient:
         reason = err.strip() or out.strip() or f"exit code {code}"
         if any(s in reason.lower() for s in SLURM_MISSING):
             raise SlurmUnavailableError(f"sbatch failed on {name}: {reason}. {SLURM_HINT.format(command='sbatch', name=name)}")
-        if code not in (0, -1, 255) and not any(s in reason.lower() for s in SLURM_BUSY):
-            raise SlurmLLMError(f"sbatch failed on {name}: {reason}")  # Slurm refused the job
+        busy = any(s in reason.lower() for s in SLURM_BUSY)
+        # Slurm refused the job. sbatch exits 255 for some refusals (e.g. an invalid #SBATCH line),
+        # like ssh when the connection drops, so its own "sbatch: error:" decides.
+        if not busy and ("sbatch: error" in reason.lower() or code not in (0, -1, 255)):
+            raise SlurmLLMError(f"sbatch failed on {name}: {reason}")
 
         # The answer was lost: look for the job in the queue
         if self._connection_lost(code):

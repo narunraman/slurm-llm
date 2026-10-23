@@ -217,3 +217,12 @@ def test_jobs_hides_old_finished_jobs_found_on_the_cluster(manager, loader, fake
     result = CliRunner().invoke(main, ["jobs", "--no-refresh"])
     assert result.exit_code == 0 and "No jobs (use --all" in result.output
     assert "10" in CliRunner().invoke(main, ["jobs", "--no-refresh", "--all"]).output
+
+
+def test_sbatch_options_with_spaces_are_quoted():
+    from slurm_llm.job import sbatch_directive
+
+    assert sbatch_directive("--comment=vLLM for project X") == '--comment="vLLM for project X"'
+    assert sbatch_directive("--partition=gpu") == "--partition=gpu"
+    assert sbatch_directive('--comment="already quoted"') == '--comment="already quoted"'
+    assert sbatch_directive("-p gpu") == "-p gpu"

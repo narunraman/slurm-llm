@@ -294,18 +294,30 @@ def connect(clusters: tuple, persist: str | None, status: bool):
 
 @main.command()
 @click.option("--cluster", "-c", "cluster_names", multiple=True, help="Cluster to set up (repeatable). Default: all.")
-def setup(cluster_names: tuple):
+@click.option("--from-pypi", "from_pypi", multiple=True, metavar="PACKAGE",
+              help="On a cluster with its own wheelhouse, install PACKAGE (vllm, huggingface_hub, or all) from PyPI too.")
+def setup(cluster_names: tuple, from_pypi: tuple):
     """Create the Python environment for vLLM on each cluster.
 
     On each cluster: creates `remote_root` and `model_path`, installs vLLM and `huggingface_hub` into
     `<model_path>/.venv` (using the cluster's `setup_commands`), and, if you have a Hugging Face token,
     logs in to Hugging Face there. Safe to run again.
+
+    On clusters that provide their own Python packages in a wheelhouse (listed in pip's settings,
+    e.g. Alliance Canada), packages are installed from it only, as those sites ask. If one is
+    missing there, `--from-pypi PACKAGE` (or `all`) allows PyPI for it.
     """
+    import shlex
+
     from rich.table import Table
 
     from .config import read_hf_token, tilde
     from .ssh import shell_path
     from .template_source import resolve_template
+
+    unknown = set(from_pypi) - {"all", "vllm", "huggingface_hub"}
+    if unknown:
+        fail(f"--from-pypi takes vllm, huggingface_hub or all, not {', '.join(sorted(unknown))}")
 
     loader = _loader()
     targets = _select_clusters(loader, cluster_names)
@@ -332,9 +344,13 @@ def setup(cluster_names: tuple):
             client = _connect(cfg)
             for path in (cfg.remote_root, model_path):
                 console.print(f"  [green]✓[/green] {client.resolve_dir(path)}")
-            code = client.execute_command_streaming(f"bash -l <<'SLURM_LLM_SETUP'\n{script}\nSLURM_LLM_SETUP", timeout=1800)
+            env = f"SLURM_LLM_CLUSTER={shlex.quote(name)} SLURM_LLM_FROM_PYPI={shlex.quote(' '.join(from_pypi))}"
+            code = client.execute_command_streaming(
+                f"{env} bash -l <<'SLURM_LLM_SETUP'\n{script}\nSLURM_LLM_SETUP", timeout=1800
+            )
             if code != 0:
                 raise RuntimeError(f"setup script failed (exit code {code}); see its output above")
+            _keep_setup_modules(loader, client, cfg, venv)
             # A script can exit 0 without having installed anything (e.g. a custom template without
             # `set -e`), so check the environment the way jobs use it before reporting "ready".
             check = "\n".join([*cfg.setup_commands, f"{shell_path(venv)}/bin/python -c 'import vllm, huggingface_hub'"])
@@ -366,6 +382,33 @@ def setup(cluster_names: tuple):
     console.print(table)
     if any(row[0] != "ready" for row in results.values()):
         sys.exit(1)
+
+
+def _keep_setup_modules(loader, client, cfg, venv: str) -> None:
+    """Add modules the setup script had to load (e.g. OpenCV on Alliance Canada) to setup_commands.
+
+    Jobs run the same setup_commands before starting vLLM, so they load them too.
+    """
+    import re
+
+    from .config import tilde
+    from .ssh import shell_path
+
+    _, out, _ = client.execute_command(f"cat {shell_path(venv)}/.slurm-llm-modules 2>/dev/null", timeout=15)
+    for modules in dict.fromkeys(line.strip() for line in out.splitlines() if line.strip()):
+        loaded = [c for c in cfg.setup_commands if re.match(r"\s*(module|ml)\b", c)]
+        if all(any(re.search(rf"(^|\s){re.escape(m)}(/|\s|$)", c) for c in loaded) for m in modules.split()):
+            continue
+        command = f"module load {modules}"
+        cfg.setup_commands.append(command)
+        where = tilde(loader.config_dir / "clusters.yaml")
+        if loader.add_setup_command(cfg.name, command):
+            console.print(f"  [green]✓[/green] Added `{command}` to {cfg.name}'s setup_commands in {where}, so jobs load it too")
+        else:
+            err_console.print(
+                f"  [yellow]⚠[/yellow] vLLM on {cfg.name} needs `{command}`: add it to {cfg.name}'s setup_commands "
+                f"in {where}, so jobs load it too", highlight=False,
+            )
 
 
 def disk_summary(df_line: str) -> str:

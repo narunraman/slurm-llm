@@ -139,8 +139,8 @@ def test_setup_explains_an_outdated_custom_template(run, isolated_home, monkeypa
 class _SetupSSH:
     """A cluster for `sllm setup`: the setup script "succeeds"; `import_ok` decides the import check."""
 
-    def __init__(self, import_ok=True):
-        self.import_ok = import_ok
+    def __init__(self, import_ok=True, loaded_modules=""):
+        self.import_ok, self.loaded_modules = import_ok, loaded_modules
         self.commands, self.streamed = [], []
 
     def resolve_dir(self, path):
@@ -154,6 +154,8 @@ class _SetupSSH:
         self.commands.append((command, use_login_shell))
         if "import vllm" in command:
             return (0, "", "") if self.import_ok else (1, "", "Traceback ...\nModuleNotFoundError: No module named 'vllm'\n")
+        if ".slurm-llm-modules" in command:
+            return 0, self.loaded_modules, ""
         if command.startswith("df"):
             return 0, "lustre-mds1.example.org@o2ib:/scratch/very/long/filesystem 1.0P 400T 600T 40% /scratch\n", ""
         return 0, "", ""
@@ -182,6 +184,33 @@ def test_setup_output(run, monkeypatch):
     assert "Installing vLLM (the first time can take 10 minutes)" in ssh.streamed[0]
     # the disk column is a short summary, not the (long, truncated) df line
     assert "600T free of 1.0P (40% used)" in result.output
+
+
+def test_setup_passes_from_pypi_to_the_script(run, monkeypatch):
+    ssh = _SetupSSH()
+    monkeypatch.setattr("slurm_llm.cli._connect", lambda cfg: ssh)
+    result = run("setup", "-c", "cluster-a", "--from-pypi", "vllm")
+    assert result.exit_code == 0, result.output
+    assert ssh.streamed[0].startswith("SLURM_LLM_CLUSTER=cluster-a SLURM_LLM_FROM_PYPI=vllm bash -l <<")
+    result = run("setup", "-c", "cluster-a", "--from-pypi", "torch")
+    assert result.exit_code == 1 and "--from-pypi takes vllm, huggingface_hub or all, not torch" in result.output
+
+
+def test_setup_keeps_modules_the_wheelhouse_needed(run, monkeypatch, isolated_home):
+    # cluster-a's setup_commands load python/3.12; the setup script also had to load gcc and opencv
+    ssh = _SetupSSH(loaded_modules="gcc opencv\n")
+    monkeypatch.setattr("slurm_llm.cli._connect", lambda cfg: ssh)
+    result = run("setup", "-c", "cluster-a")
+    assert result.exit_code == 0, result.output
+    assert "Added `module load gcc opencv` to cluster-a's setup_commands" in result.output
+    text = (isolated_home / ".config/slurm-llm/clusters.yaml").read_text()
+    assert "- module load python/3.12\n      - module load gcc opencv\n" in text
+    # the import check already runs the way jobs will, with the module
+    check = next(c for c, _ in ssh.commands if "import vllm" in c)
+    assert check.startswith("module load python/3.12\nmodule load gcc opencv\n")
+    # next time it is already there
+    result = run("setup", "-c", "cluster-a")
+    assert "Added" not in result.output and text == (isolated_home / ".config/slurm-llm/clusters.yaml").read_text()
 
 
 def test_disk_summary():
