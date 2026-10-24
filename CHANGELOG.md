@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- An [Inspect](https://inspect.aisi.org.uk) model provider: `inspect eval TASK --model sllm/MODEL` starts the
+  model (or reuses its job), waits for it, forwards a port and sends the evaluation's requests to it
+  through Inspect's vLLM client. Options: `-M cluster=`, `-M time=`, `-M keep=false` (cancel the job when
+  the evaluation ends). Install with the `inspect` extra: `slurm-llm[inspect]`.
+- `SlurmLLM.served_model` and `SlurmLLM.base_url`: the name vLLM serves the model under, and its URL
+  through the port forward.
+
 ## [0.8.0] - 2026-10-23
 
 slurm-llm now uses rclust (v0.4.0) for SSH connections and GPU types.

@@ -51,6 +51,15 @@ with SlurmLLM("qwen-3-8b") as llm:     # submits or reuses a job, waits, opens a
 
 For jobs that run on the cluster itself, `submit_model("qwen-3-8b", instances=4)` starts servers without waiting and `SlurmLLM(model, local=True, nodes_dir=...)` connects to them from a compute node.
 
+With [Inspect](https://inspect.aisi.org.uk) (`uv tool install "slurm-llm[inspect] @ git+https://github.com/narunraman/slurm-llm"`, or `pip install "slurm-llm[inspect]"` next to Inspect), any evaluation can use a model by its short name: the first request starts it (or reuses its running job), waits for it, and forwards a port.
+
+```bash
+inspect eval steer_bench/steer --model sllm/qwen-3-8b
+inspect eval-set steer_bench/steer --model sllm/qwen-3-8b,sllm/llama-3.1-8b-instruct --log-dir logs/
+```
+
+Model options: `-M cluster=NAME` to run there, `-M time=4:00:00` for a new job's time limit, and `-M keep=false` to cancel the job when the evaluation ends (by default it keeps running for the next one).
+
 ## Commands
 
 | Command | What it does |
