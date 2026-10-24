@@ -7,7 +7,7 @@ slurm-llm serves open language models with [vLLM](https://docs.vllm.ai) on your 
 You need Python 3.10+, OpenSSH and [uv](https://docs.astral.sh/uv/) on your machine, and a Slurm cluster with GPUs you can reach with `ssh`, whose login node can reach the internet.
 
 ```bash
-uv tool install git+https://github.com/narunraman/slurm-llm@v0.8.0
+uv tool install git+https://github.com/narunraman/slurm-llm@v0.9.0
 ```
 
 This installs `sllm` and `rclust`. Describe your clusters to rclust, then add where slurm-llm should keep models:
@@ -51,7 +51,7 @@ with SlurmLLM("qwen-3-8b") as llm:     # submits or reuses a job, waits, opens a
 
 For jobs that run on the cluster itself, `submit_model("qwen-3-8b", instances=4)` starts servers without waiting and `SlurmLLM(model, local=True, nodes_dir=...)` connects to them from a compute node.
 
-With [Inspect](https://inspect.aisi.org.uk) (`uv tool install "slurm-llm[inspect] @ git+https://github.com/narunraman/slurm-llm"`, or `pip install "slurm-llm[inspect]"` next to Inspect), any evaluation can use a model by its short name: the first request starts it (or reuses its running job), waits for it, and forwards a port.
+With [Inspect](https://inspect.aisi.org.uk) (`uv tool install "slurm-llm[inspect] @ git+https://github.com/narunraman/slurm-llm@v0.9.0"`, or `pip install "slurm-llm[inspect]"` next to Inspect), any evaluation can use a model by its short name: the first request starts it (or reuses its running job), waits for it, and forwards a port.
 
 ```bash
 inspect eval steer_bench/steer --model sllm/qwen-3-8b
