@@ -12,6 +12,11 @@ from inspect_ai.model import get_model  # noqa: E402
 from slurm_llm import inspect_api  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def no_failures_from_other_tests():
+    inspect_api._failed.clear()
+
+
 @pytest.fixture
 def sllm(monkeypatch):
     """A SlurmLLM that is "ready" at once, serving Qwen3-8B on localhost:43210."""
@@ -65,3 +70,17 @@ def test_the_job_is_released_when_the_process_ends(sllm, monkeypatch):
     client.cancel_job.assert_called_once()
     api.close()  # and a later close does nothing more
     client.cancel_job.assert_called_once()
+
+
+def test_a_failed_setup_is_not_tried_again(sllm):
+    # the job crashed: requests waiting for the same model must not each submit another one
+    cls, client = sllm
+    client.ensure_ready.side_effect = RuntimeError("Job 7 ended (status: FAILED)")
+    first = get_model("sllm/qwen-3-8b", cluster="cluster-a").api
+    with pytest.raises(RuntimeError, match="FAILED"):
+        first._resolve_server()
+    for _ in range(3):
+        waiting = get_model("sllm/qwen-3-8b", cluster="cluster-a").api
+        with pytest.raises(RuntimeError, match="could not be started earlier in this run: Job 7 ended"):
+            waiting._resolve_server()
+    cls.assert_called_once()  # one attempt, one job

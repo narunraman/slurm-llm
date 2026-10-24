@@ -19,6 +19,12 @@ from inspect_ai.model import GenerateConfig
 from inspect_ai.model._providers.vllm import VLLMAPI
 
 
+# Models whose setup failed in this process (a job that crashed, a missing download, ...), by
+# model and cluster. Requests waiting for the same model, and Inspect's retries, get the same error
+# instead of each starting (and paying for) another job.
+_failed: dict[tuple[str, str | None], Exception] = {}
+
+
 def _flag(value: Any) -> bool:
     return value if isinstance(value, bool) else str(value).strip().lower() not in ("false", "0", "no", "off")
 
@@ -53,8 +59,15 @@ class SlurmLLMAPI(VLLMAPI):
         if self._init_base_url is None:
             from .client import SlurmLLM
 
+            key = (self._sllm_args["model"], self._sllm_args["cluster"])
+            if key in _failed:
+                raise RuntimeError(f"{key[0]} could not be started earlier in this run: {_failed[key]}")
             client = SlurmLLM(**self._sllm_args)
-            client.ensure_ready()
+            try:
+                client.ensure_ready()
+            except Exception as e:
+                _failed[key] = e
+                raise
             self._sllm = client
             # Inspect does not always close models: release the job when the process ends too
             atexit.register(self._release)
