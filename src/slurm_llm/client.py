@@ -204,6 +204,20 @@ class SlurmLLM:
         else:
             self._tunnel_registry = None
 
+    @property
+    def served_model(self) -> str:
+        """The name the model's vLLM server serves it under (after ensure_ready)."""
+        if not self._job:
+            raise RuntimeError("not ready: call ensure_ready() first")
+        return self._job.model_name
+
+    @property
+    def base_url(self) -> str:
+        """The OpenAI-compatible URL of the model through the port forward (after ensure_ready)."""
+        if not self._job or not self.local_port:
+            raise RuntimeError("not ready: call ensure_ready() first")
+        return f"http://localhost:{self.local_port}/v1"
+
     def ensure_ready(self) -> None:
         """Ensure model job is running and tunnel is established.
 

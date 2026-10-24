@@ -26,8 +26,17 @@ dev = [
 [project.scripts]
 sllm = "slurm_llm.cli:main"
 
+[project.entry-points.inspect_ai]
+slurm_llm = "slurm_llm._inspect_registry"
+
 [project.urls]
 Homepage = "https://github.com/narunraman/slurm-llm"
+
+[project.optional-dependencies]
+inspect = [
+    "inspect-ai>=0.3.276,<0.4",
+    "openai>=3.4",  # Inspect's OpenAI-compatible (vLLM) client needs it
+]
 
 [tool.setuptools.package-data]
 slurm_llm = [

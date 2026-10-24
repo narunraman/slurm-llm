@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- An [Inspect](https://inspect.aisi.org.uk) model provider: `inspect eval TASK --model sllm/MODEL` starts the
+  model (or reuses its job), waits for it, forwards a port and sends the evaluation's requests to it
+  through Inspect's vLLM client. Options: `-M cluster=`, `-M time=`, `-M keep=false` (cancel the job when
+  the evaluation ends). Install with the `inspect` extra: `slurm-llm[inspect]`.
+- `SlurmLLM.served_model` and `SlurmLLM.base_url`: the name vLLM serves the model under, and its URL
+  through the port forward.
+
 ### Changed
-- Jobs start vLLM with `--generation-config vllm`: vLLM's own sampling defaults instead of each
-  model's, so models are compared alike (benchmarks such as steer-bench ask for it). A model's
-  `vllm_extra_args` can say otherwise, e.g. `[--generation-config, auto]`.
 - Jobs keep vLLM's, Triton's and FlashInfer's caches in `model_path/.cache` instead of the home
   directory, which is often small on clusters (unless `VLLM_CACHE_ROOT`, `TRITON_CACHE_DIR` or
   `FLASHINFER_WORKSPACE_BASE` are set already).

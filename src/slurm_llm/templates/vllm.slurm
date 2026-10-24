@@ -98,12 +98,9 @@ SLURM_LLM_CHECK
     fi
 fi
 
-# --generation-config vllm: vLLM's sampling defaults, not each model's own, so models are compared
-# alike (a model's vllm_extra_args can say otherwise, e.g. --generation-config auto)
 vllm serve "$MODEL_DIR" \
     --port "$PORT" \
     --host 0.0.0.0 \
     --tensor-parallel-size {num_gpus} \
     --served-model-name {model_name} \
-    --generation-config vllm \
     {max_model_len_arg} {vllm_extra_args}
