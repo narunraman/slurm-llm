@@ -64,6 +64,40 @@ mkdir -p "$NODE_DIR"
 printf 'node=%s\nmodel=%s\njob_id=%s\n' "$SLURMD_NODENAME" "{model_name}" "$SLURM_JOB_ID" > "$NODE_FILE"
 trap 'rm -f "$NODE_FILE"' EXIT
 
+# Caches go next to the models, not in the home directory (often small on clusters); yours win if set
+CACHE="{model_path}/.cache"
+export VLLM_CACHE_ROOT="${{VLLM_CACHE_ROOT:-$CACHE/vllm}}" TRITON_CACHE_DIR="${{TRITON_CACHE_DIR:-$CACHE/triton}}"
+export FLASHINFER_WORKSPACE_BASE="${{FLASHINFER_WORKSPACE_BASE:-{model_path}}}"  # it adds .cache/flashinfer
+
+# FlashInfer's sampler (vLLM's fastest) compiles itself on first use with this node's CUDA compiler.
+# If that compiler is missing or older than the CUDA PyTorch was built with, compiling fails, so use
+# vLLM's own sampler instead; lines starting "slurm-llm:" are shown by `sllm prepare`.
+if [ -z "${{VLLM_USE_FLASHINFER_SAMPLER:-}}" ]; then
+    WHY=$(python - <<'SLURM_LLM_CHECK' 2>/dev/null
+import importlib.util, os, re, subprocess
+import torch
+from torch.utils.cpp_extension import CUDA_HOME
+if torch.version.cuda and importlib.util.find_spec("flashinfer") and not importlib.util.find_spec("flashinfer_jit_cache"):
+    try:
+        out = subprocess.run([os.path.join(CUDA_HOME or "", "bin", "nvcc"), "--version"],
+                             capture_output=True, text=True, timeout=60).stdout
+        found = re.search(r"release (\d+)\.(\d+)", out)
+    except OSError:
+        found = None
+    built = tuple(int(x) for x in torch.version.cuda.split(".")[:2])
+    if not found:
+        print("there is no CUDA compiler on this node")
+    elif tuple(int(x) for x in found.groups()) < built:
+        print("this node's CUDA compiler is " + ".".join(found.groups()) + ", older than the CUDA "
+              + torch.version.cuda + " that vLLM was built with")
+SLURM_LLM_CHECK
+)
+    if [ -n "$WHY" ]; then
+        export VLLM_USE_FLASHINFER_SAMPLER=0
+        echo "slurm-llm: using vLLM's own sampler, not FlashInfer's: $WHY"
+    fi
+fi
+
 vllm serve "$MODEL_DIR" \
     --port "$PORT" \
     --host 0.0.0.0 \

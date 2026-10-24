@@ -131,3 +131,10 @@ def test_health_wait_stops_when_the_connection_is_lost(fake_ssh, monkeypatch):
     ssh.has_active_connection = lambda: False
     with pytest.raises(NotConnectedError, match="Lost the connection to cluster-a while waiting for vLLM"):
         wait_for_vllm_health(_job(node="g1", local_port=30077), ssh, show_progress=False)
+
+
+def test_job_notes_are_read_from_its_log(fake_ssh):
+    ssh = fake_ssh(responses=[("grep '^slurm-llm: '", (0, "slurm-llm: using vLLM's own sampler, not FlashInfer's: no compiler\n", ""))])
+    assert health.job_notes(ssh, _job()) == ["using vLLM's own sampler, not FlashInfer's: no compiler"]
+    assert "slurm-77.out" in ssh.commands[-1]
+    assert health.job_notes(fake_ssh(responses=[("grep", (1, "", ""))]), _job()) == []  # none
