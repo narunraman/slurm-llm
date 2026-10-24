@@ -173,6 +173,15 @@ def detect_vllm_port(
     )
 
 
+def job_notes(ssh_client: SSHClient, job: JobInfo) -> list[str]:
+    """What the job script chose and why: its log lines starting "slurm-llm: " (prefix dropped)."""
+    log_path = shell_path(ssh_client.get_remote_slurm_log_path(job.job_id))
+    code, out, _ = ssh_client.execute_command(f"grep '^slurm-llm: ' {log_path} 2>/dev/null", timeout=15)
+    if code != 0:
+        return []
+    return [line.removeprefix("slurm-llm: ").strip() for line in out.splitlines() if line.strip()]
+
+
 def wait_for_vllm_health(
     job: JobInfo,
     ssh_client: SSHClient,

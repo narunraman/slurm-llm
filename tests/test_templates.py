@@ -193,3 +193,26 @@ def test_a_rerun_loads_the_modules_an_earlier_run_needed(setup_run, tmp_path):
     assert result.returncode == 0, result.stderr
     assert log[log.index("module load gcc opencv") - 1].startswith("python3 -m pip config")  # loaded before activating
     assert (tmp_path / "venv" / ".slurm-llm-modules").read_text() == "gcc opencv\n"
+
+
+def test_jobs_use_vllms_generation_defaults_unless_a_model_says_otherwise(loader, tmp_path):
+    from slurm_llm.config import ModelConfig, ResourceConfig
+    from slurm_llm.job import JobManager
+
+    def script(extra):
+        return JobManager(job_store_path=tmp_path / "jobs.json").generate_slurm_script(
+            ModelConfig(id="models--Qwen--Qwen3-8B", vllm_extra_args=extra), ResourceConfig(memory=32, time="1:00:00"),
+            loader.get_cluster("cluster-a"), output_dir="/abs/llm")
+    serve = script([])[script([]).index("vllm serve"):]
+    assert "--generation-config vllm" in serve
+    serve = script(["--generation-config", "auto"])
+    # vLLM takes the last value given, so the model's own setting wins
+    assert serve.index("--generation-config vllm") < serve.index("--generation-config auto")
+
+
+def test_caches_stay_out_of_the_home_directory(loader, tmp_path):
+    script = _render("vllm.slurm", loader, tmp_path)
+    for var in ("VLLM_CACHE_ROOT", "TRITON_CACHE_DIR"):
+        assert f'{var}="${{{var}:-$CACHE' in script  # next to the models, unless already set
+    assert 'CACHE="$SCRATCH/models/.cache"' in script
+    assert 'FLASHINFER_WORKSPACE_BASE="${FLASHINFER_WORKSPACE_BASE:-$SCRATCH/models}"' in script  # + .cache/flashinfer

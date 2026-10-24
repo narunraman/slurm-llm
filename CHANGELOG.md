@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Jobs start vLLM with `--generation-config vllm`: vLLM's own sampling defaults instead of each
+  model's, so models are compared alike (benchmarks such as steer-bench ask for it). A model's
+  `vllm_extra_args` can say otherwise, e.g. `[--generation-config, auto]`.
+- Jobs keep vLLM's, Triton's and FlashInfer's caches in `model_path/.cache` instead of the home
+  directory, which is often small on clusters (unless `VLLM_CACHE_ROOT`, `TRITON_CACHE_DIR` or
+  `FLASHINFER_WORKSPACE_BASE` are set already).
+
+### Fixed
+- vLLM no longer fails to start on nodes whose CUDA compiler is too old for FlashInfer's sampler,
+  which compiles itself on first use (e.g. CUDA 12.4 with a vLLM built for CUDA 13). The job checks
+  the node and uses vLLM's own sampler there; `sllm prepare` says so. Elsewhere FlashInfer's
+  (faster) sampler is kept.
+
 ## [0.8.0] - 2026-10-23
 
 slurm-llm now uses rclust (v0.4.0) for SSH connections and GPU types.

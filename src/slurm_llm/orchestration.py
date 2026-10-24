@@ -24,6 +24,7 @@ from .scheduler import ClusterScheduler
 from .health import (
     _check_job_errors,
     detect_vllm_port,
+    job_notes,
     wait_for_vllm_health,
     wait_for_job_running,
     query_model_info,
@@ -332,6 +333,7 @@ class JobOrchestrator:
                         show_progress=self.config.show_progress,
                         busy_timeout=self.config.slurm_busy_timeout,
                     )
+                    self._show_job_notes(existing_job, ssh_client)
 
                     # Query model info to get max_model_length (only if not already set)
                     if (
@@ -423,6 +425,7 @@ class JobOrchestrator:
                 show_progress=self.config.show_progress,
                 busy_timeout=self.config.slurm_busy_timeout,
             )
+            self._show_job_notes(job, ssh_client)
 
             # Query model info to get max_model_length
             if job.node and job.local_port:
@@ -455,6 +458,11 @@ class JobOrchestrator:
 
         # Return ready job (caller will print success message)
         return job
+
+    def _show_job_notes(self, job: JobInfo, ssh_client) -> None:
+        """Print what the job script chose and why (its "slurm-llm:" log lines), once vLLM is up."""
+        for note in job_notes(ssh_client, job):
+            console.print(f"  [blue]ℹ {note}[/blue]", highlight=False)
 
     def _submit_job(
         self,
